@@ -1,0 +1,22 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# logs & misc
+*.log
+.DS_Store
+Thumbs.db
+
+# test
+coverage/

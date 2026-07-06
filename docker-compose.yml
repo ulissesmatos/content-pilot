@@ -1,0 +1,22 @@
+# Dev: apenas o Postgres. Web e worker rodam no host com `pnpm dev`.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: content-pilot-db
+    environment:
+      POSTGRES_USER: contentpilot
+      POSTGRES_PASSWORD: contentpilot
+      POSTGRES_DB: contentpilot
+    ports:
+      # 5433 no host: a máquina de dev tem um PostgreSQL nativo ocupando a 5432
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contentpilot -d contentpilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

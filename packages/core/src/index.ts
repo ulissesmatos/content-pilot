@@ -19,6 +19,7 @@ export * from './templates/schema';
 export * from './templates/seeds/game-codes';
 export * from './templates/seeds/generic-article';
 export * from './renderers';
+export * from './jobs/schemas';
 export * from './pipeline/types';
 export * from './pipeline/validate-output';
 export * from './pipeline/run-pipeline';

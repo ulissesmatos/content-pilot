@@ -13,6 +13,7 @@
   "dependencies": {
     "@content-pilot/core": "workspace:*",
     "@content-pilot/db": "workspace:*",
+    "cron-parser": "^5.6.1",
     "dotenv": "^17.4.2",
     "pg-boss": "^12.25.1"
   },

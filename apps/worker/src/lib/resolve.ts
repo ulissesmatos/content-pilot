@@ -59,6 +59,12 @@ export async function resolveTemplate(db: Db, workspaceId: string, slugOrId: str
   return { id: row.id, slug: row.slug, config: parseTemplateConfig(row.config) };
 }
 
+export async function resolveTemplateById(db: Db, templateId: string): Promise<{ id: string; slug: string; config: TemplateConfig }> {
+  const [row] = await db.select().from(contentTemplates).where(eq(contentTemplates.id, templateId)).limit(1);
+  if (!row) throw new Error(`Template ${templateId} não encontrado.`);
+  return { id: row.id, slug: row.slug, config: parseTemplateConfig(row.config) };
+}
+
 async function firstCredentialOfType(db: Db, workspaceId: string, type: string) {
   const [cred] = await db
     .select()

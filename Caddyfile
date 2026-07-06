@@ -1,0 +1,5 @@
+# TLS automático via Let's Encrypt — defina DOMAIN no .env do servidor
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:3000
+}

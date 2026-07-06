@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dry-run": "tsx src/cli/dry-run.ts",
     "build": "tsup src/index.ts --format esm --out-dir dist --clean",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"

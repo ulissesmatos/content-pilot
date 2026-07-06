@@ -1,6 +1,24 @@
 // @content-pilot/core — toda a lógica de negócio vive aqui.
-// Módulos são adicionados por milestone: pipeline/llm/search/templates (M2).
 export * from './vault';
 export * from './cms/types';
 export * from './cms/wordpress';
 export * from './http/fetch-retry';
+export * from './i18n/dates';
+export * from './html/managed-block';
+export * from './search/normalize';
+export * from './search/tavily';
+export * from './search/select-sources';
+export * from './search/build-context';
+export * from './llm/types';
+export * from './llm/request';
+export * from './llm/parse';
+export * from './llm/client';
+export * from './llm/pricing';
+export * from './templates/interpolate';
+export * from './templates/schema';
+export * from './templates/seeds/game-codes';
+export * from './templates/seeds/generic-article';
+export * from './renderers';
+export * from './pipeline/types';
+export * from './pipeline/validate-output';
+export * from './pipeline/run-pipeline';

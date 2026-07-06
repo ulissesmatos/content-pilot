@@ -142,6 +142,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@content-pilot/core':
+        specifier: workspace:*
+        version: link:../core
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3

@@ -1,16 +1,16 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { hash } from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
+import { gameCodesTemplate, genericArticleTemplate, parseTemplateConfig } from '@content-pilot/core';
 import { createDb } from './client';
-import { users, workspaces } from './schema';
+import { contentTemplates, users, workspaces } from './schema';
 
 config({ path: resolve(import.meta.dirname, '../../../.env') });
 
 /**
- * Seed idempotente: garante 1 workspace default e 1 usuário admin
- * (ADMIN_EMAIL/ADMIN_PASSWORD do .env). Os templates builtin são semeados
- * pelo pacote core (seed-templates) a partir do M2.
+ * Seed idempotente: workspace default, usuário admin (ADMIN_EMAIL/ADMIN_PASSWORD
+ * do .env) e templates builtin (workspace NULL, read-only no painel).
  */
 async function main() {
   const db = createDb();
@@ -39,6 +39,39 @@ async function main() {
     console.log(`Usuário admin criado: ${adminEmail}`);
   } else {
     console.log(`Usuário admin já existe: ${adminEmail}`);
+  }
+
+  // Templates builtin: valida com o zod do core e faz upsert por slug (workspace NULL)
+  for (const seed of [gameCodesTemplate, genericArticleTemplate]) {
+    const cfg = parseTemplateConfig(seed.config);
+    const [existing] = await db
+      .select({ id: contentTemplates.id, version: contentTemplates.version })
+      .from(contentTemplates)
+      .where(and(isNull(contentTemplates.workspaceId), eq(contentTemplates.slug, seed.slug)))
+      .limit(1);
+    if (existing) {
+      await db
+        .update(contentTemplates)
+        .set({
+          name: seed.name,
+          description: seed.description,
+          config: cfg,
+          version: existing.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(contentTemplates.id, existing.id));
+      console.log(`Template builtin atualizado: ${seed.slug} (v${existing.version + 1})`);
+    } else {
+      await db.insert(contentTemplates).values({
+        workspaceId: null,
+        slug: seed.slug,
+        name: seed.name,
+        description: seed.description,
+        config: cfg,
+        isBuiltin: true,
+      });
+      console.log(`Template builtin criado: ${seed.slug}`);
+    }
   }
 
   console.log('Seed concluído.');

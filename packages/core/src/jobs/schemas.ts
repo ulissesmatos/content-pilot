@@ -34,6 +34,11 @@ export const jobLimitsSchema = z.object({
    * full: fluxo completo original (mais preciso em posts bagunçados, ~10x mais tokens).
    */
   mode: z.enum(['eco', 'full']).default('eco'),
+  /**
+   * Profundidade da busca Tavily. 'auto' segue o modo (eco→basic, full→advanced);
+   * 'advanced' força busca profunda mesmo no eco (mais créditos Tavily, fontes melhores).
+   */
+  searchDepth: z.enum(['auto', 'basic', 'advanced']).default('auto'),
 });
 export type JobLimits = z.infer<typeof jobLimitsSchema>;
 

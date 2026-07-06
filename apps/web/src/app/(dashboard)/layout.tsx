@@ -19,7 +19,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <ThemeToggle />
           <UserMenu email={session.email} />
         </header>
-        <main className="flex-1 space-y-6 p-6">{children}</main>
+        <main className="min-w-0 flex-1 space-y-6 overflow-x-hidden p-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

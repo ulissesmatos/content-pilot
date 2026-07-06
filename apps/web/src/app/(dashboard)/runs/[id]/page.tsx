@@ -4,6 +4,7 @@ import { contentJobs, getDb, runItems, runs } from '@content-pilot/db';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { PageHeader } from '@/components/page-header';
 import { RunItemCard, type RunItemView } from '@/components/runs/run-item-card';
+import { StopRunButton } from '@/components/runs/stop-run-button';
 import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { requireSession } from '@/lib/auth';
@@ -37,6 +38,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         title={`Execução de ${dateFmt.format(run.startedAt)}`}
         description={`${jobName ?? 'pauta'} · disparo ${run.trigger === 'cron' ? 'agendado' : 'manual'}`}
       >
+        {isRunning ? <StopRunButton runId={run.id} /> : null}
         <StatusBadge status={run.status} />
       </PageHeader>
 

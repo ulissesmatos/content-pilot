@@ -32,6 +32,7 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
   const [cronPreset, setCronPreset] = useState<string>(CRON_PRESETS[0].value);
   const [provider, setProvider] = useState('anthropic');
   const [mode, setMode] = useState<'eco' | 'full'>('eco');
+  const [searchDepth, setSearchDepth] = useState<'auto' | 'basic' | 'advanced'>('auto');
   const [skipUnchanged, setSkipUnchanged] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
@@ -56,6 +57,7 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
         tokenBudgetPerRun: formData.get('tokenBudgetPerRun'),
         skipIfSourcesUnchanged: skipUnchanged,
         mode,
+        searchDepth,
       });
       if (result.ok) {
         toast.success('Job criado e agendado.');
@@ -170,6 +172,19 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
             <p className="text-muted-foreground text-xs">
               No econômico, sem mudança nas fontes o sistema só atualiza a data do widget (zero tokens).
             </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Busca Tavily</Label>
+            <Select value={searchDepth} onValueChange={(v) => setSearchDepth(v as 'auto' | 'basic' | 'advanced')}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Automática — basic no econômico, advanced no completo</SelectItem>
+                <SelectItem value="basic">Basic — 1 crédito por busca, conteúdo mais raso</SelectItem>
+                <SelectItem value="advanced">Advanced — 2 créditos por busca, fontes mais completas</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

@@ -4,6 +4,7 @@ import {
   eq,
   postSourceState,
   runItems,
+  runs,
   sites,
   type Db,
 } from '@content-pilot/db';
@@ -39,6 +40,13 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
     .limit(1);
   if (existing) {
     await maybeFinalizeRun(db, runId);
+    return;
+  }
+
+  // Run cancelado pelo usuário → não processa mais nada dele
+  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!run || run.status !== 'running') {
+    console.log(`[post ${wpPostId}] run ${runId} não está em execução (${run?.status ?? 'inexistente'}) — pulando`);
     return;
   }
 
@@ -104,6 +112,7 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
       {
         mode: 'update',
         profile: limits.mode,
+        searchDepth: limits.searchDepth === 'auto' ? undefined : limits.searchDepth,
         template: template.config,
         language: job.language ?? site.defaultLanguage,
         siteName: site.name,

@@ -42,7 +42,7 @@ function DataList({ title, items, tone }: { title: string; items: string[]; tone
       <p className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">{title}</p>
       <div className="flex flex-wrap gap-1">
         {items.map((item, i) => (
-          <span key={i} className={cn('rounded px-1.5 py-0.5 font-mono text-xs', toneClass)}>
+          <span key={i} className={cn('max-w-full break-all rounded px-1.5 py-0.5 font-mono text-xs', toneClass)}>
             {item}
           </span>
         ))}
@@ -60,7 +60,7 @@ export function RunItemCard({ item }: { item: RunItemView }) {
   const extractedCount = extractedLists.reduce((acc, [, list]) => acc + list.length, 0);
 
   return (
-    <Card className="py-0">
+    <Card className="min-w-0 overflow-hidden py-0">
       <CardContent className="p-0">
         <button
           type="button"
@@ -86,7 +86,7 @@ export function RunItemCard({ item }: { item: RunItemView }) {
         {open ? (
           <div className="space-y-4 border-t px-4 py-4">
             {item.validationErrors?.length ? (
-              <div className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+              <div className="break-words rounded-md bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                 <p className="mb-1 font-medium">Bloqueado pela validação:</p>
                 <ul className="list-inside list-disc space-y-0.5">
                   {item.validationErrors.map((e, i) => (
@@ -122,9 +122,9 @@ export function RunItemCard({ item }: { item: RunItemView }) {
                 </p>
                 <ul className="space-y-1">
                   {item.sources.map((s, i) => (
-                    <li key={i} className="flex items-center gap-2 text-sm">
+                    <li key={i} className="flex min-w-0 items-center gap-2 text-sm">
                       {s.trusted ? (
-                        <Badge variant="secondary" className="bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-400">
+                        <Badge variant="secondary" className="shrink-0 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-400">
                           confiável
                         </Badge>
                       ) : null}
@@ -132,7 +132,7 @@ export function RunItemCard({ item }: { item: RunItemView }) {
                         href={s.url}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="text-muted-foreground truncate hover:underline"
+                        className="text-muted-foreground min-w-0 flex-1 truncate hover:underline"
                       >
                         {s.title || s.url}
                       </a>

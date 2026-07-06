@@ -279,6 +279,24 @@ describe('runPipeline (integração com fakes)', () => {
     expect(r.extractedResultsCount).toBe(0);
   });
 
+  it('searchDepth sobrescreve o padrão do perfil (advanced no eco)', async () => {
+    const llm = fakeLlm([{ text: GEN_RESPONSE }]);
+    const seenOpts: unknown[] = [];
+    const search: SearchClient = {
+      async search(_q, opts) {
+        seenOpts.push(opts);
+        return {
+          results: [{ title: 'F', url: 'https://progameguides.com/x', content: 's', raw_content: 'códigos: FRUIT20' }],
+        };
+      },
+      async extract() {
+        return { results: [], failed_results: [] };
+      },
+    };
+    await runPipeline(input({ profile: 'eco', searchDepth: 'advanced' }), { llmGenerate: llm, llmVerify: llm, search });
+    expect(seenOpts[0]).toMatchObject({ depth: 'advanced' });
+  });
+
   it('modo generate usa o prompt de geração e força hasChanges', async () => {
     const llm = fakeLlm([{ text: GEN_RESPONSE }, { text: VERIFY_APPROVES_ALL }]);
     const r = await runPipeline(

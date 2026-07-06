@@ -10,6 +10,14 @@ import { QUEUE, type JobRunPayload } from './names';
  */
 export async function handleJobRun(db: Db, boss: PgBoss, payload: JobRunPayload) {
   const { jobId, runId } = payload;
+
+  // Run cancelado antes de começar → aborta
+  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!run || run.status !== 'running') {
+    console.log(`[job.run] run ${runId} não está em execução — abortando`);
+    return;
+  }
+
   const [job] = await db.select().from(contentJobs).where(eq(contentJobs.id, jobId)).limit(1);
   if (!job) throw new Error(`content_job ${jobId} não existe`);
   const [site] = await db.select().from(sites).where(eq(sites.id, job.siteId)).limit(1);

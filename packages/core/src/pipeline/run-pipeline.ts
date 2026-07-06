@@ -43,6 +43,8 @@ import {
 export interface PipelineInput {
   mode: 'update' | 'generate';
   profile?: 'full' | 'eco';
+  /** Sobrescreve a profundidade da busca Tavily (default: eco→basic, full→advanced). */
+  searchDepth?: 'basic' | 'advanced';
   template: TemplateConfig;
   /** Idioma do conteúdo (prompts/datas). Cai no defaultLanguage do template. */
   language?: string;
@@ -145,10 +147,14 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
   }));
 
   // 4. Busca (paralela, tolerante a falha individual)
-  const searchOpts = profile === 'eco' ? { depth: ECO.searchDepth, maxResults: ECO.maxResults } : undefined;
+  const searchDepth = input.searchDepth ?? (profile === 'eco' ? ECO.searchDepth : 'advanced');
+  const searchOpts = {
+    depth: searchDepth,
+    maxResults: profile === 'eco' ? ECO.maxResults : undefined,
+  };
   const buckets: SearchBucket[] = await Promise.all(
     queries.map(async (q) => {
-      log(`busca [${q.name}]${profile === 'eco' ? ' (basic)' : ''}: ${q.query}`);
+      log(`busca [${q.name}] (${searchDepth}): ${q.query}`);
       const res = await deps.search.search(q.query, searchOpts);
       if (res.error) log(`busca [${q.name}] falhou: ${res.error}`);
       return { name: q.name, query: q.query, results: res.results };

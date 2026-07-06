@@ -6,6 +6,7 @@ import { QUEUE, type BriefGeneratePayload, type JobRunPayload, type PostProcessP
 import { handleSchedulerTick } from './queues/scheduler-tick';
 import { handleJobRun } from './queues/job-run';
 import { handlePostProcess } from './queues/post-process';
+import { handleBriefGenerate } from './queues/brief-generate';
 
 config({ path: resolve(process.cwd(), '../../.env') });
 
@@ -46,8 +47,7 @@ async function main() {
   );
 
   await boss.work(QUEUE.briefGenerate, async (jobs: Array<{ data: BriefGeneratePayload }>) => {
-    // implementado no M5 (pautas)
-    for (const job of jobs) console.log('[brief.generate] pendente de implementação (M5):', job.data.briefId);
+    for (const job of jobs) await handleBriefGenerate(db, job.data);
   });
 
   console.log(`[worker] pronto — filas registradas (concorrência post.process: ${concurrency})`);

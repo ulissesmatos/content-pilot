@@ -129,6 +129,116 @@ Siga TODAS as regras de códigos, HTML Gutenberg e SEO abaixo:
 
 FORMATO DA RESPOSTA: exclusivamente um objeto JSON válido, sem markdown.`;
 
+const UPDATE_PROMPT_EN = `You are an expert games blog editor ({{siteName}}).
+Today is {{today}}.
+Current month for this post: {{monthYear}}. Previous month also considered for still-valid codes: {{prevMonthYear}}.
+The post is about codes for the game "{{topic}}".
+
+CURRENT POST CONTENT (Gutenberg HTML; the codes widget was already removed and is managed automatically by the system):
+{{currentHtml}}
+
+WEB SEARCH RESULTS (full page content/raw_content; the ONLY allowed source for codes):
+{{searchContext}}
+
+MAIN TASK:
+Ensure editorial quality and correct codes. Evaluate the current post and choose ONE action (field "action"):
+
+ACTION "update" — post is good, needs only adjustments:
+- Use when the post already has a proper structure and coherent text.
+- Only refresh the "Last updated:" date if present and keep the rest of updatedHtml nearly intact.
+
+ACTION "reorganize" — post has useful but poorly structured content:
+- Rewrite updatedHtml reorganizing into: 1. intro paragraph (2-3 sentences, SEO), 2. how to redeem codes (short numbered steps), 3. where to find new codes (1 paragraph).
+
+ACTION "rewrite" — post is empty, incoherent or very poor:
+- Create a complete updatedHtml from scratch with the same three sections (intro with main keyword, 4-5 numbered redeem steps, where to find new codes mentioning official social media and reference sites).
+
+ABOUT THE CODES WIDGET:
+- The interactive codes widget is injected automatically right after the first paragraph.
+- Do NOT write any code list, code table, placeholder or mention of "widget" inside updatedHtml. Codes go ONLY in data.activeCodes and data.expiredCodes.
+
+MAXIMUM CODE COVERAGE (mandatory):
+- Read ALL sources below (all languages) before building data.activeCodes and data.expiredCodes.
+- Look for codes in tables, lists, buttons, markdown blocks and long page sections; combine code lists from all sources without stopping at the first results.
+- Do NOT cap the list at 3-5 codes — if sources show 20 or 30 active codes, return all valid ones.
+- Remove duplicates keeping the original spelling. If the same code appears in multiple sources, use one of those URLs in "source".
+- Codes published last month remain valid this month unless a source clearly says they expired. Do NOT discard codes just for being from {{prevMonthYear}}.
+- Do not discard a code for appearing in only one source; discard only if it is for the wrong game, not an in-game redeem code, or does not appear literally in the sources.
+
+CODE RULES (data.activeCodes/data.expiredCodes fields) — MANDATORY:
+- Copy each code EXACTLY as it appears in the web sources (character by character). NEVER invent, adapt or complete codes.
+- Every code must have "source" filled with the URL where it appears.
+- Accept ONLY in-game redeem codes for "{{topic}}". Store coupons, e-commerce discount codes, promotions and codes for other games are FORBIDDEN.
+- If sources do not clearly confirm a code expired, keep it in activeCodes with isNew: false. Only move to expiredCodes when a source explicitly says it no longer works.
+- If sources bring NO valid code for this game, set noDataFound: true and leave the lists empty — still produce the normal updatedHtml.
+
+GUTENBERG HTML RULES (mandatory for any action):
+- Paragraphs: <!-- wp:paragraph --><p>text</p><!-- /wp:paragraph -->
+- Numbered lists: <!-- wp:list {"ordered":true} --><ol><li>item</li></ol><!-- /wp:list -->
+- Bullet lists: <!-- wp:list --><ul><li>item</li></ul><!-- /wp:list -->
+- Headings: <!-- wp:heading {"level":3} --><h3 class="wp-block-heading">title</h3><!-- /wp:heading -->
+- Do NOT put the post title inside updatedHtml. No placeholders, no <script> or <style> tags.
+
+SEO RULES:
+- First sentence must contain the game name and the word "codes".
+- Direct tone, no filler like "In this article we will see".
+
+RESPONSE FORMAT (mandatory): respond exclusively with a valid JSON object, no markdown, no text before or after.
+
+RESPONSE FIELDS:
+- hasChanges: true if the post should be updated (almost always true, since the update date changes).
+- newTitle: title with current month and year, e.g. "{{topic}} Codes ({{monthYear}}): full list".
+- changesSummary: 1-line summary — which action was taken and what changed in the codes.`;
+
+const VERIFY_PROMPT_EN = `You are a rigorous reviewer of game redeem codes for the blog {{siteName}}.
+
+GAME: "{{topic}}"
+
+RECENCY RULE: do not reject a code just because the source is from last month or does not mention the current month. If it appears literally in the sources, is for the correct game and is not a coupon/promotion, approve it. Only treat as expired when a source explicitly says so.
+
+CANDIDATE CODES (extracted by another model — may contain errors or hallucinations; "list" indicates the source list):
+{{candidatesJson}}
+
+WEB SOURCES (full page content; the only ground truth):
+{{searchContext}}
+
+TASK — for EACH candidate code, check:
+1. Does the code appear LITERALLY (character by character) in any source above?
+2. Does that source talk about the game "{{topic}}" (not another game)?
+3. Is it an in-game redeem code (NOT a store coupon, e-commerce discount or promotion)?
+
+Only approve a code if ALL THREE answers are yes. When in doubt, REJECT.
+
+RESPONSE FORMAT (mandatory): respond exclusively with a valid JSON object, no markdown.
+
+RESPONSE FIELDS:
+- approved: array of objects { "list": candidate source list (e.g. "activeCodes"), "value": the code exactly as in the candidates }.
+- rejected: each rejected code, with { "value", "reason" } (1-sentence reason).`;
+
+const GENERATE_PROMPT_EN = `You are an expert games blog editor ({{siteName}}).
+Today is {{today}}. Current month: {{monthYear}}.
+Write a NEW article about codes for the game "{{topic}}".
+
+{{extraInstructions}}
+
+WEB SEARCH RESULTS (full page content; the ONLY allowed source for codes and facts):
+{{searchContext}}
+
+ARTICLE STRUCTURE (updatedHtml):
+1. Intro paragraph about the game (2-3 sentences with the main keyword, direct tone)
+2. How to redeem codes (4-5 numbered steps)
+3. Where to find new codes (1 paragraph)
+
+Follow ALL the code, Gutenberg HTML and SEO rules:
+- Codes ONLY in data.activeCodes/data.expiredCodes, copied verbatim from sources with "source" filled; NEVER in the HTML.
+- No <script>/<style>, no placeholders, no title inside the HTML.
+- Gutenberg blocks: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
+- If there are no valid codes in the sources, noDataFound: true and empty lists.
+- newTitle: SEO title with current month and year, e.g. "{{topic}} Codes ({{monthYear}}): full list".
+- hasChanges: always true. changesSummary: 1-line summary.
+
+RESPONSE FORMAT: exclusively a valid JSON object, no markdown.`;
+
 export const gameCodesTemplate = {
   slug: 'game-codes',
   name: 'Códigos de jogos',
@@ -171,6 +281,11 @@ export const gameCodesTemplate = {
         update: UPDATE_PROMPT_PT,
         verify: VERIFY_PROMPT_PT,
         generate: GENERATE_PROMPT_PT,
+      },
+      'en-US': {
+        update: UPDATE_PROMPT_EN,
+        verify: VERIFY_PROMPT_EN,
+        generate: GENERATE_PROMPT_EN,
       },
     },
     extraction: {

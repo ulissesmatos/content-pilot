@@ -95,7 +95,8 @@ export async function recordLlmCalls(
   calls: LlmCallRecord[],
 ) {
   for (const c of calls) {
-    const cost = estimateCostUsd(c.model, c.inputTokens, c.outputTokens);
+    // custo real do provedor (OpenRouter) quando disponível; senão estimativa por tabela
+    const cost = c.costUsd ?? estimateCostUsd(c.model, c.inputTokens, c.outputTokens);
     await db.insert(llmCalls).values({
       workspaceId,
       runId,

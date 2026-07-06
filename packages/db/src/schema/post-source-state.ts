@@ -1,4 +1,4 @@
-import { integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { workspaces } from './workspaces';
 import { contentJobs } from './content-jobs';
 
@@ -18,6 +18,8 @@ export const postSourceState = pgTable(
       .references(() => contentJobs.id),
     wpPostId: integer('wp_post_id').notNull(),
     lastSourcesHash: text('last_sources_hash').notNull(),
+    /** Dados extraídos publicados na última atualização — base da pré-checagem sem IA do modo eco. */
+    lastExtractedData: jsonb('last_extracted_data'),
     lastProcessedAt: timestamp('last_processed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.jobId, t.wpPostId] })],

@@ -28,6 +28,12 @@ export const jobLimitsSchema = z.object({
   maxPostsPerRun: z.number().int().min(1).max(100).default(10),
   tokenBudgetPerRun: z.number().int().positive().default(500_000),
   skipIfSourcesUnchanged: z.boolean().default(true),
+  /**
+   * eco: busca basic sem Extract + pré-checagem determinística; IA só quando
+   * os códigos mudaram, com contexto reduzido e sem a 2ª chamada de verificação.
+   * full: fluxo completo original (mais preciso em posts bagunçados, ~10x mais tokens).
+   */
+  mode: z.enum(['eco', 'full']).default('eco'),
 });
 export type JobLimits = z.infer<typeof jobLimitsSchema>;
 

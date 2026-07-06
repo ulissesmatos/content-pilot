@@ -26,6 +26,7 @@ function fakeLlm(responses: Array<Partial<LlmCompleteResult> | Error>): LlmProvi
         text: '',
         inputTokens: 100,
         outputTokens: 50,
+        costUsd: null,
         truncated: false,
         provider: 'anthropic',
         model: 'claude-haiku-4-5',
@@ -41,9 +42,9 @@ function fakeSearch(sourcesText: string): SearchClient {
     async search() {
       return {
         results: [
-          { title: 'Fonte 1', url: 'https://progameguides.com/codes', content: 'snippet', raw_content: sourcesText },
-          { title: 'Fonte 2', url: 'https://tryhardguides.com/codes', content: 'snippet2', raw_content: sourcesText },
-          { title: 'Fonte 3', url: 'https://robloxden.com/codes', content: 'snippet3', raw_content: sourcesText },
+          { title: 'Fonte 1', url: 'https://progameguides.com/codes', content: 'resumo um', raw_content: sourcesText },
+          { title: 'Fonte 2', url: 'https://tryhardguides.com/codes', content: 'resumo dois', raw_content: sourcesText },
+          { title: 'Fonte 3', url: 'https://robloxden.com/codes', content: 'resumo tres', raw_content: sourcesText },
         ],
       };
     },
@@ -200,6 +201,82 @@ describe('runPipeline (integração com fakes)', () => {
     expect(r.status).toBe('validation_failed');
     expect(r.validationErrors.length).toBeGreaterThan(0);
     expect(r.hasChanges).toBe(false);
+  });
+
+  it('eco sem mudanças: zero chamadas LLM e widget atualizado com os dados anteriores', async () => {
+    const llm = fakeLlm([{ text: GEN_RESPONSE }]);
+    const lastData = {
+      activeCodes: [{ code: 'FRUIT20', reward: '2x XP', isNew: false, source: 'https://ex.com' }],
+      expiredCodes: [],
+    };
+    const r = await runPipeline(input({ profile: 'eco', lastData }), {
+      llmGenerate: llm,
+      llmVerify: llm,
+      search: fakeSearch('all codes: FRUIT20 still working'),
+    });
+    expect(r.status).toBe('ready');
+    expect(r.action).toBe('widget_refresh');
+    expect(llm.calls.length).toBe(0);
+    expect(r.inputTokens).toBe(0);
+    expect(r.prePass).toMatchObject({ ran: true, changed: false });
+    expect(r.finalHtml).toContain('DG-CODES-WIDGET:START');
+    expect(r.finalHtml).toContain('FRUIT20');
+    expect(r.finalHtml).toContain('Post antigo.'); // conteúdo original preservado
+  });
+
+  it('eco com código novo: 1 única chamada LLM (sem verify) com contexto reduzido', async () => {
+    const llm = fakeLlm([{ text: GEN_RESPONSE }]);
+    const lastData = {
+      activeCodes: [{ code: 'OLDCODE7', reward: null, isNew: false, source: 's' }],
+      expiredCodes: [],
+    };
+    const filler = 'texto de enchimento '.repeat(600);
+    const r = await runPipeline(input({ profile: 'eco', lastData }), {
+      llmGenerate: llm,
+      llmVerify: llm,
+      search: fakeSearch(`${filler} new codes today: FRUIT20 and OLDCODE7 ${filler}`),
+    });
+    expect(r.prePass).toMatchObject({ ran: true, changed: true });
+    expect(r.status).toBe('ready');
+    expect(llm.calls.length).toBe(1); // sem chamada de verificação
+    expect(llm.calls[0]!.prompt).toContain('FRUIT20');
+    expect(llm.calls[0]!.prompt.length).toBeLessThan(filler.length * 2); // contexto reduzido
+    // camada 3 continua ativa: ALUCINADO1 dropado mesmo sem verify
+    expect(r.dropped.map((d) => d.value)).toContain('ALUCINADO1');
+  });
+
+  it('eco sem lastData (primeira execução): segue direto para a chamada LLM', async () => {
+    const llm = fakeLlm([{ text: GEN_RESPONSE }]);
+    const r = await runPipeline(input({ profile: 'eco' }), {
+      llmGenerate: llm,
+      llmVerify: llm,
+      search: fakeSearch('códigos: FRUIT20 ativo'),
+    });
+    expect(r.prePass).toBeNull();
+    expect(r.status).toBe('ready');
+    expect(llm.calls.length).toBe(1);
+  });
+
+  it('eco usa busca basic e pula o extract', async () => {
+    const llm = fakeLlm([{ text: GEN_RESPONSE }]);
+    const seenOpts: unknown[] = [];
+    let extractCalled = false;
+    const search: SearchClient = {
+      async search(_q, opts) {
+        seenOpts.push(opts);
+        return {
+          results: [{ title: 'F', url: 'https://progameguides.com/x', content: 's', raw_content: 'códigos: FRUIT20' }],
+        };
+      },
+      async extract() {
+        extractCalled = true;
+        return { results: [], failed_results: [] };
+      },
+    };
+    const r = await runPipeline(input({ profile: 'eco' }), { llmGenerate: llm, llmVerify: llm, search });
+    expect(seenOpts[0]).toMatchObject({ depth: 'basic' });
+    expect(extractCalled).toBe(false);
+    expect(r.extractedResultsCount).toBe(0);
   });
 
   it('modo generate usa o prompt de geração e força hasChanges', async () => {

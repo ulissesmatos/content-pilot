@@ -25,6 +25,7 @@ async function main() {
       provider: { type: 'string', default: 'anthropic' },
       model: { type: 'string', default: 'claude-haiku-4-5' },
       language: { type: 'string' },
+      profile: { type: 'string', default: 'full' },
       publish: { type: 'boolean', default: false },
       out: { type: 'string' },
     },
@@ -55,6 +56,7 @@ async function main() {
   const result = await runPipeline(
     {
       mode: 'update',
+      profile: values.profile === 'eco' ? 'eco' : 'full',
       template: template.config,
       language: values.language ?? site.defaultLanguage,
       siteName: site.name,

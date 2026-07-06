@@ -16,6 +16,8 @@ export interface LlmCallRecord {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** Custo real informado pelo provedor (OpenRouter); null = usar estimativa por tabela. */
+  costUsd: number | null;
   durationMs: number;
   status: 'ok' | 'error' | 'truncated';
 }
@@ -47,6 +49,13 @@ export interface RejectedItem {
   reason: string;
 }
 
+export interface PrePassInfo {
+  ran: boolean;
+  changed: boolean;
+  missing: string[];
+  newCandidates: string[];
+}
+
 export interface PipelineResult {
   status: PipelineStatus;
   hasChanges: boolean;
@@ -69,4 +78,6 @@ export interface PipelineResult {
   llmCalls: LlmCallRecord[];
   inputTokens: number;
   outputTokens: number;
+  /** Diagnóstico da pré-checagem determinística (modo econômico). */
+  prePass: PrePassInfo | null;
 }

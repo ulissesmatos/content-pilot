@@ -28,6 +28,8 @@ export interface LlmCompleteResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /** Custo real em USD quando o provedor informa (OpenRouter); senão null. */
+  costUsd: number | null;
   truncated: boolean;
   provider: LlmProviderName;
   model: string;

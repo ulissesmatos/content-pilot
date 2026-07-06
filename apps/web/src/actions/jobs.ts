@@ -26,6 +26,7 @@ const createJobSchema = z.object({
   maxPostsPerRun: z.coerce.number().int().min(1).max(100).default(10),
   tokenBudgetPerRun: z.coerce.number().int().positive().default(500_000),
   skipIfSourcesUnchanged: z.boolean().default(true),
+  mode: z.enum(['eco', 'full']).default('eco'),
 });
 
 function parseIdList(raw: string): number[] {
@@ -74,6 +75,7 @@ export async function createJobAction(input: unknown): Promise<ActionResult<{ id
           maxPostsPerRun: data.maxPostsPerRun,
           tokenBudgetPerRun: data.tokenBudgetPerRun,
           skipIfSourcesUnchanged: data.skipIfSourcesUnchanged,
+          mode: data.mode,
         }),
         nextRunAt,
       })

@@ -61,6 +61,7 @@ export class HttpLlmProvider implements LlmProvider {
       text,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
       truncated: isTruncated(json),
       provider: this.cfg.provider,
       model: this.cfg.model,

@@ -22,4 +22,5 @@ export * from './renderers';
 export * from './jobs/schemas';
 export * from './pipeline/types';
 export * from './pipeline/validate-output';
+export * from './pipeline/pre-pass';
 export * from './pipeline/run-pipeline';

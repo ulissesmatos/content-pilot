@@ -15,11 +15,13 @@ import {
   type TemplateConfig,
 } from '../templates/schema';
 import { validateOutput } from './validate-output';
+import { buildTrimmedContext, prePassCheck } from './pre-pass';
 import {
   BudgetExceededError,
   type LlmCallRecord,
   type PipelineDeps,
   type PipelineResult,
+  type PrePassInfo,
   type RejectedItem,
 } from './types';
 
@@ -29,12 +31,18 @@ import {
  * skip por hash → extract → contexto → geração (structured output) →
  * verificação LLM → validação determinística → render/injeção do bloco.
  *
- * `mode: 'update'` recebe o HTML atual do post; `mode: 'generate'` (pautas)
- * parte só do tópico. Publicação e persistência ficam com o chamador.
+ * Perfis:
+ * - `full`: fluxo completo (extract advanced + 2 chamadas LLM com contexto integral).
+ * - `eco`: busca basic sem Extract, pré-checagem determinística compara as
+ *   fontes com os dados já publicados; sem mudança → atualiza só o widget
+ *   (zero IA); com mudança → 1 única chamada LLM com contexto reduzido a
+ *   janelas ao redor dos códigos, sem a 2ª chamada de verificação (a checagem
+ *   verbatim determinística continua ativa).
  */
 
 export interface PipelineInput {
   mode: 'update' | 'generate';
+  profile?: 'full' | 'eco';
   template: TemplateConfig;
   /** Idioma do conteúdo (prompts/datas). Cai no defaultLanguage do template. */
   language?: string;
@@ -46,6 +54,8 @@ export interface PipelineInput {
     /** HTML atual (mode update). */
     contentRaw?: string;
   };
+  /** Dados extraídos publicados na última execução (pré-checagem do modo eco). */
+  lastData?: Record<string, unknown> | null;
   /** Tópico explícito (pautas); no update é derivado do título pelo template. */
   topicOverride?: string;
   extraInstructions?: string;
@@ -61,12 +71,20 @@ interface EnvelopeParsed {
   data: Record<string, unknown>;
 }
 
+const ECO = {
+  searchDepth: 'basic' as const,
+  maxResults: 10,
+  trimmedContextMaxChars: 40_000,
+  trimmedWindowChars: 350,
+};
+
 function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
 export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Promise<PipelineResult> {
   const cfg = input.template;
+  const profile = input.profile ?? 'full';
   const language = input.language ?? cfg.defaultLanguage;
   const now = deps.now?.() ?? new Date();
   const log = deps.log ?? (() => {});
@@ -93,6 +111,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     llmCalls,
     inputTokens: 0,
     outputTokens: 0,
+    prePass: null,
   };
 
   const finish = (patch: Partial<PipelineResult>): PipelineResult => {
@@ -125,14 +144,16 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     }),
   }));
 
-  // 4. Busca (sequencial, tolerante a falha individual — como no n8n)
-  const buckets: SearchBucket[] = [];
-  for (const q of queries) {
-    log(`busca [${q.name}]: ${q.query}`);
-    const res = await deps.search.search(q.query);
-    if (res.error) log(`busca [${q.name}] falhou: ${res.error}`);
-    buckets.push({ name: q.name, query: q.query, results: res.results });
-  }
+  // 4. Busca (paralela, tolerante a falha individual)
+  const searchOpts = profile === 'eco' ? { depth: ECO.searchDepth, maxResults: ECO.maxResults } : undefined;
+  const buckets: SearchBucket[] = await Promise.all(
+    queries.map(async (q) => {
+      log(`busca [${q.name}]${profile === 'eco' ? ' (basic)' : ''}: ${q.query}`);
+      const res = await deps.search.search(q.query, searchOpts);
+      if (res.error) log(`busca [${q.name}] falhou: ${res.error}`);
+      return { name: q.name, query: q.query, results: res.results };
+    }),
+  );
 
   // 5. Seleção de fontes
   const selection = selectSources(buckets, cfg.sources);
@@ -153,11 +174,17 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     });
   }
 
-  // 7. Extract + contexto
-  const extractFn = deps.extract ?? (async (urls: string[]) => (await deps.search.extract(urls)).results);
-  const extractResults = await extractFn(selection.candidates.map((c) => c.url));
+  // 7. Contexto — eco pula o Tavily Extract e usa o raw_content da própria busca
+  let extractResults: Awaited<ReturnType<NonNullable<PipelineDeps['extract']>>> = [];
+  if (profile === 'full') {
+    const extractFn = deps.extract ?? (async (urls: string[]) => (await deps.search.extract(urls)).results);
+    extractResults = await extractFn(selection.candidates.map((c) => c.url));
+  }
   const context = buildSearchContext(selection.candidates, extractResults, cfg.sources);
-  log(`contexto: ${context.searchContext.length} chars de ${context.resultsCount} fontes (${context.extractedResultsCount} extraídas)`);
+  log(
+    `contexto: ${context.searchContext.length} chars de ${context.resultsCount} fontes` +
+      (profile === 'full' ? ` (${context.extractedResultsCount} extraídas)` : ' (sem extract — modo eco)'),
+  );
 
   const sourcesPatch = {
     sources: context.sources,
@@ -166,7 +193,81 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     extractedResultsCount: context.extractedResultsCount,
   };
 
-  // 8. Prompt de geração/atualização
+  // 8. Pré-checagem determinística (eco + update + extração + dados anteriores)
+  let promptContext = context.searchContext;
+  let prePassInfo: PrePassInfo | null = null;
+  const lastData = input.lastData ?? null;
+
+  if (
+    profile === 'eco' &&
+    input.mode === 'update' &&
+    cfg.extraction.enabled &&
+    cfg.extraction.verbatimLists.length > 0 &&
+    lastData
+  ) {
+    const valuesOf = (listPath: string) =>
+      (Array.isArray(lastData[listPath]) ? (lastData[listPath] as Array<Record<string, unknown>>) : []).map((item) =>
+        String(item[cfg.extraction.verbatimLists.find((l) => l.path === listPath)!.valueField] ?? ''),
+      );
+    const lastValues = cfg.extraction.verbatimLists.flatMap((l) => valuesOf(l.path));
+    // convenção: a primeira lista verbatim é a "principal" (ativos)
+    const lastActiveValues = valuesOf(cfg.extraction.verbatimLists[0]!.path);
+
+    if (lastValues.length > 0) {
+      const pre = prePassCheck({
+        searchContext: context.searchContext,
+        lastValues,
+        lastActiveValues,
+        valuePattern: cfg.extraction.valuePattern,
+      });
+      prePassInfo = { ran: true, ...pre };
+      log(
+        `pré-checagem: ${pre.changed ? 'MUDANÇAS detectadas' : 'sem mudanças'} ` +
+          `(sumiram: ${pre.missing.length}, novos candidatos: ${pre.newCandidates.length})`,
+      );
+
+      if (!pre.changed) {
+        // Zero IA: re-renderiza o bloco gerenciado com os mesmos dados (data atualizada)
+        const renderer = cfg.managedBlock.enabled ? managedBlockRenderers[cfg.managedBlock.rendererId] : undefined;
+        if (renderer && rawHtml) {
+          const inner = renderer({
+            data: lastData,
+            slug: input.post.slug,
+            topicLabel: topic || input.post.title,
+            locale: language,
+            now,
+          });
+          const finalHtml = injectManagedBlock(rawHtml, wrapManagedBlock(inner, cfg.managedBlock.markerPrefix));
+          return finish({
+            ...sourcesPatch,
+            status: 'ready',
+            hasChanges: true,
+            action: 'widget_refresh',
+            newTitle: input.post.title,
+            finalHtml,
+            data: lastData,
+            changesSummary: 'Pré-checagem sem IA: nenhum código novo ou expirado nas fontes — apenas a data do widget foi atualizada.',
+            prePass: prePassInfo,
+          });
+        }
+        return finish({
+          ...sourcesPatch,
+          status: 'no_change',
+          changesSummary: 'Pré-checagem sem IA: nenhuma mudança detectada nas fontes.',
+          prePass: prePassInfo,
+        });
+      }
+
+      // Mudança detectada → contexto reduzido a janelas relevantes p/ a única chamada LLM
+      promptContext = buildTrimmedContext(context.searchContext, [...pre.newCandidates, ...lastValues], {
+        windowChars: ECO.trimmedWindowChars,
+        maxChars: ECO.trimmedContextMaxChars,
+      });
+      log(`contexto reduzido: ${promptContext.length} chars (de ${context.searchContext.length})`);
+    }
+  }
+
+  // 9. Prompt de geração/atualização
   const prompts = promptsForLanguage(cfg, language);
   const promptTemplate = input.mode === 'generate' ? prompts.generate : prompts.update;
   if (!promptTemplate) {
@@ -174,6 +275,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       ...sourcesPatch,
       status: 'llm_failed',
       skipReason: `template sem prompt de ${input.mode === 'generate' ? 'geração' : 'atualização'} para ${language}`,
+      prePass: prePassInfo,
     });
   }
 
@@ -184,18 +286,18 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     topic,
     postTitle: input.post.title,
     currentHtml: (rawHtml || '(post vazio)').slice(0, 8000),
-    searchContext: context.searchContext || '(nenhum resultado)',
+    searchContext: promptContext || '(nenhum resultado)',
     siteName: input.siteName ?? '',
     extraInstructions: input.extraInstructions ?? '',
   };
   const prompt = interpolate(promptTemplate, promptVars);
 
-  // 9. Chamada LLM de geração
+  // 10. Chamada LLM de geração
   try {
     await deps.checkBudget?.();
   } catch (err) {
     if (err instanceof BudgetExceededError) {
-      return finish({ ...sourcesPatch, status: 'budget_exceeded', skipReason: err.message });
+      return finish({ ...sourcesPatch, status: 'budget_exceeded', skipReason: err.message, prePass: prePassInfo });
     }
     throw err;
   }
@@ -215,11 +317,19 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       model: gen.model,
       inputTokens: gen.inputTokens,
       outputTokens: gen.outputTokens,
+      costUsd: gen.costUsd,
       durationMs: gen.durationMs,
       status: gen.truncated ? 'truncated' : 'ok',
     });
-    if (!gen.text) return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: 'Resposta da API LLM vazia' });
-    if (gen.truncated) return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: 'Resposta do LLM truncada (max_tokens)' });
+    if (!gen.text)
+      return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: 'Resposta da API LLM vazia', prePass: prePassInfo });
+    if (gen.truncated)
+      return finish({
+        ...sourcesPatch,
+        status: 'llm_failed',
+        skipReason: 'Resposta do LLM truncada (max_tokens)',
+        prePass: prePassInfo,
+      });
     genText = gen.text;
   } catch (err) {
     if (err instanceof LlmError) {
@@ -229,17 +339,23 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
         model: deps.llmGenerate.model,
         inputTokens: 0,
         outputTokens: 0,
+        costUsd: null,
         durationMs: 0,
         status: 'error',
       });
-      return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: err.message });
+      return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: err.message, prePass: prePassInfo });
     }
     throw err;
   }
 
   const parsedRaw = extractJson(genText) as Partial<EnvelopeParsed> | null;
   if (!parsedRaw) {
-    return finish({ ...sourcesPatch, status: 'llm_failed', skipReason: 'JSON não encontrado na resposta do LLM' });
+    return finish({
+      ...sourcesPatch,
+      status: 'llm_failed',
+      skipReason: 'JSON não encontrado na resposta do LLM',
+      prePass: prePassInfo,
+    });
   }
 
   const parsed: EnvelopeParsed = {
@@ -259,10 +375,12 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       status: 'no_change',
       changesSummary: parsed.changesSummary,
       noDataFound: parsed.noDataFound,
+      prePass: prePassInfo,
     });
   }
 
-  // 10. Verificação LLM (temp 0) dos itens verbatim
+  // 11. Verificação LLM (temp 0) dos itens verbatim — pulada no modo eco
+  //     (a checagem verbatim determinística da etapa 12 continua ativa)
   let data = parsed.data;
   let rejected: RejectedItem[] = [];
   let verifyFailed = false;
@@ -274,7 +392,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       )
     : 0;
 
-  if (cfg.extraction.enabled && verbatimItemCount > 0 && prompts.verify) {
+  if (profile === 'full' && cfg.extraction.enabled && verbatimItemCount > 0 && prompts.verify) {
     const candidates = cfg.extraction.verbatimLists.flatMap((l) =>
       (Array.isArray(data[l.path]) ? (data[l.path] as Array<Record<string, unknown>>) : []).map((item) => ({
         list: l.path,
@@ -302,6 +420,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
         model: ver.model,
         inputTokens: ver.inputTokens,
         outputTokens: ver.outputTokens,
+        costUsd: ver.costUsd,
         durationMs: ver.durationMs,
         status: ver.truncated ? 'truncated' : 'ok',
       });
@@ -334,7 +453,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       }
     } catch (err) {
       if (err instanceof BudgetExceededError) {
-        return finish({ ...sourcesPatch, status: 'budget_exceeded', skipReason: err.message });
+        return finish({ ...sourcesPatch, status: 'budget_exceeded', skipReason: err.message, prePass: prePassInfo });
       }
       if (err instanceof LlmError) {
         llmCalls.push({
@@ -343,6 +462,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
           model: deps.llmVerify.model,
           inputTokens: 0,
           outputTokens: 0,
+          costUsd: null,
           durationMs: 0,
           status: 'error',
         });
@@ -353,7 +473,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     }
   }
 
-  // 11. Validação determinística fail-safe (camada 3)
+  // 12. Validação determinística fail-safe (camada 3) — contra o mesmo contexto enviado ao LLM
   const validation = validateOutput(
     {
       hasChanges: true,
@@ -361,7 +481,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       newTitle: parsed.newTitle,
       updatedHtml: parsed.updatedHtml,
       data,
-      searchContext: context.searchContext,
+      searchContext: promptContext,
       resultsCount: context.resultsCount,
     },
     cfg,
@@ -380,10 +500,11 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       validationErrors: validation.errors,
       verifyFailed,
       changesSummary: parsed.changesSummary,
+      prePass: prePassInfo,
     });
   }
 
-  // 12. Render + injeção do bloco gerenciado
+  // 13. Render + injeção do bloco gerenciado
   let finalHtml = parsed.updatedHtml ?? '';
   if (cfg.managedBlock.enabled && cfg.managedBlock.rendererId) {
     const renderer = managedBlockRenderers[cfg.managedBlock.rendererId];
@@ -414,5 +535,6 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     rejected,
     dropped: validation.dropped,
     verifyFailed,
+    prePass: prePassInfo,
   });
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "post_source_state" ADD COLUMN "last_extracted_data" jsonb;

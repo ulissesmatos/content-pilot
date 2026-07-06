@@ -29,8 +29,14 @@ export interface TavilyExtractResponse {
   error?: string;
 }
 
+export interface SearchOptions {
+  /** 'basic' custa menos créditos Tavily; 'advanced' traz raw_content mais completo. */
+  depth?: 'basic' | 'advanced';
+  maxResults?: number;
+}
+
 export interface SearchClient {
-  search(query: string): Promise<TavilySearchResponse>;
+  search(query: string, opts?: SearchOptions): Promise<TavilySearchResponse>;
   extract(urls: string[]): Promise<TavilyExtractResponse>;
 }
 
@@ -48,7 +54,7 @@ export class TavilyClient implements SearchClient {
   }
 
   /** Falha vira `{results: [], error}` — mesmo comportamento do onError: continueRegularOutput do n8n. */
-  async search(query: string): Promise<TavilySearchResponse> {
+  async search(query: string, opts: SearchOptions = {}): Promise<TavilySearchResponse> {
     try {
       const res = await fetchWithRetry(
         new URL('search', this.baseUrl).toString(),
@@ -57,9 +63,9 @@ export class TavilyClient implements SearchClient {
           headers: this.headers(),
           body: JSON.stringify({
             query,
-            search_depth: 'advanced',
+            search_depth: opts.depth ?? 'advanced',
             include_raw_content: true,
-            max_results: 20,
+            max_results: opts.maxResults ?? 20,
           }),
         },
         { timeoutMs: 60_000, retries: 3, retryDelayMs: 5_000 },

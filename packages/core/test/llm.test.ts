@@ -70,9 +70,17 @@ describe('parse de respostas', () => {
     expect(extractResponseText({ choices: [{ message: { content: 'xyz' } }] })).toBe('xyz');
   });
 
-  it('extrai usage dos dois formatos', () => {
-    expect(extractUsage({ usage: { input_tokens: 10, output_tokens: 5 } })).toEqual({ inputTokens: 10, outputTokens: 5 });
-    expect(extractUsage({ usage: { prompt_tokens: 7, completion_tokens: 3 } })).toEqual({ inputTokens: 7, outputTokens: 3 });
+  it('extrai usage dos dois formatos (+ custo real do OpenRouter quando presente)', () => {
+    expect(extractUsage({ usage: { input_tokens: 10, output_tokens: 5 } })).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: null,
+    });
+    expect(extractUsage({ usage: { prompt_tokens: 7, completion_tokens: 3, cost: 0.0042 } })).toEqual({
+      inputTokens: 7,
+      outputTokens: 3,
+      costUsd: 0.0042,
+    });
   });
 
   it('detecta truncamento nos dois formatos', () => {

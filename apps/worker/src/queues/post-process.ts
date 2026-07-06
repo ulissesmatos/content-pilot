@@ -93,13 +93,22 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
 
     const post = await wp.getPost(wpPostId);
 
+    // Estado da última execução: hash das fontes + dados publicados (pré-checagem eco)
+    const [state] = await db
+      .select({ hash: postSourceState.lastSourcesHash, lastData: postSourceState.lastExtractedData })
+      .from(postSourceState)
+      .where(and(eq(postSourceState.jobId, jobId), eq(postSourceState.wpPostId, wpPostId)))
+      .limit(1);
+
     const result = await runPipeline(
       {
         mode: 'update',
+        profile: limits.mode,
         template: template.config,
         language: job.language ?? site.defaultLanguage,
         siteName: site.name,
         post: { id: post.id, title: post.title, slug: post.slug, contentRaw: post.contentRaw },
+        lastData: (state?.lastData as Record<string, unknown> | null) ?? null,
       },
       {
         llmGenerate,
@@ -109,11 +118,6 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
         checkBudget: makeBudgetGuard(db, runId, limits.tokenBudgetPerRun),
         shouldSkipSources: async (hash) => {
           if (!limits.skipIfSourcesUnchanged) return false;
-          const [state] = await db
-            .select({ hash: postSourceState.lastSourcesHash })
-            .from(postSourceState)
-            .where(and(eq(postSourceState.jobId, jobId), eq(postSourceState.wpPostId, wpPostId)))
-            .limit(1);
           return state?.hash === hash;
         },
         log: (msg) => console.log(`[post ${wpPostId}] ${msg}`),
@@ -138,8 +142,13 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
       }
     }
 
-    // Hash das fontes: registra quando o post foi efetivamente processado
+    // Hash das fontes + dados publicados: registra quando o post foi efetivamente processado.
+    // Os dados extraídos (base da pré-checagem eco) só são gravados em atualização real.
     if (result.sourcesHash && (finalStatus === 'updated' || finalStatus === 'no_change')) {
+      const dataPatch =
+        finalStatus === 'updated' && result.data && Object.keys(result.data).length > 0
+          ? { lastExtractedData: result.data }
+          : {};
       await db
         .insert(postSourceState)
         .values({
@@ -147,11 +156,12 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
           jobId,
           wpPostId,
           lastSourcesHash: result.sourcesHash,
+          lastExtractedData: finalStatus === 'updated' ? result.data : null,
           lastProcessedAt: new Date(),
         })
         .onConflictDoUpdate({
           target: [postSourceState.jobId, postSourceState.wpPostId],
-          set: { lastSourcesHash: result.sourcesHash, lastProcessedAt: new Date() },
+          set: { lastSourcesHash: result.sourcesHash, lastProcessedAt: new Date(), ...dataPatch },
         });
     }
 

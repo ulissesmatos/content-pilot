@@ -58,6 +58,8 @@ export function buildLlmRequest(
       max_tokens: cappedMaxTokens,
       temperature,
       messages,
+      // devolve o custo real em USD na resposta (usage.cost) — qualquer modelo
+      usage: { include: true },
       response_format:
         format === 'json_schema'
           ? { type: 'json_schema', json_schema: { name: schemaName, strict: true, schema } }

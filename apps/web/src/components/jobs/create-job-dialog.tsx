@@ -31,6 +31,7 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
   const [templateId, setTemplateId] = useState('');
   const [cronPreset, setCronPreset] = useState<string>(CRON_PRESETS[0].value);
   const [provider, setProvider] = useState('anthropic');
+  const [mode, setMode] = useState<'eco' | 'full'>('eco');
   const [skipUnchanged, setSkipUnchanged] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
@@ -54,6 +55,7 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
         maxPostsPerRun: formData.get('maxPostsPerRun'),
         tokenBudgetPerRun: formData.get('tokenBudgetPerRun'),
         skipIfSourcesUnchanged: skipUnchanged,
+        mode,
       });
       if (result.ok) {
         toast.success('Job criado e agendado.');
@@ -153,6 +155,21 @@ export function CreateJobDialog({ sites, templates }: { sites: Option[]; templat
               <Input name="customCron" placeholder="ex.: 30 6 * * 1-5" className="font-mono" />
             ) : null}
             {err('scheduleCron') ? <p className="text-destructive text-xs">{err('scheduleCron')}</p> : null}
+          </div>
+          <div className="space-y-2">
+            <Label>Modo de execução</Label>
+            <Select value={mode} onValueChange={(v) => setMode(v as 'eco' | 'full')}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="eco">Econômico — pré-checagem sem IA; chama o LLM só quando os códigos mudam</SelectItem>
+                <SelectItem value="full">Completo — extract avançado + 2 chamadas LLM por post (mais caro/lento)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs">
+              No econômico, sem mudança nas fontes o sistema só atualiza a data do widget (zero tokens).
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

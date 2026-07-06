@@ -39,11 +39,17 @@ export function extractResponseText(response: unknown): string {
   return '';
 }
 
-export function extractUsage(response: unknown): { inputTokens: number; outputTokens: number } {
+export function extractUsage(response: unknown): {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+} {
   const u = ((response as Record<string, unknown>)?.usage ?? {}) as Record<string, number>;
   return {
     inputTokens: u.input_tokens || u.prompt_tokens || 0,
     outputTokens: u.output_tokens || u.completion_tokens || 0,
+    // OpenRouter com usage.include=true devolve o custo real em USD
+    costUsd: typeof u.cost === 'number' ? u.cost : null,
   };
 }
 

@@ -47,21 +47,51 @@ function DialogOverlay({
   )
 }
 
+/**
+ * Enquanto um Select/DropdownMenu filho está aberto, o Radix desabilita pointer-events
+ * no nosso Content (prioridade de camada do DismissableLayer) para o popup ficar por
+ * cima. O dismiss do Dialog por clique-fora é ADIADO para o evento "click" seguinte —
+ * e por essa hora o Select já fechou e o pointer-events do Content já foi restaurado,
+ * então o clique que "vazou" através do Content desabilitado até o Overlay (o alvo real
+ * do pointerdown original) é tratado como um clique genuíno no overlay, fechando o
+ * Dialog inteiro. Marcamos no pointerdown (síncrono, antes do Select desmontar) que o
+ * NOSSO Content estava com pointer-events:none naquele instante, e ignoramos o dismiss
+ * adiado nesse caso (checar só `document.body.style.pointerEvents` não basta: o próprio
+ * Dialog modal também o deixa "none" o tempo todo em que está aberto, sem Select algum).
+ */
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onPointerDownOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  const passthroughRef = React.useRef(false)
   return (
     <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay />
+      <DialogOverlay
+        onPointerDown={() => {
+          if (contentRef.current && getComputedStyle(contentRef.current).pointerEvents === "none") {
+            passthroughRef.current = true
+          }
+        }}
+      />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        ref={contentRef}
+        onPointerDownOutside={(event) => {
+          if (passthroughRef.current) {
+            passthroughRef.current = false
+            event.preventDefault()
+            return
+          }
+          onPointerDownOutside?.(event)
+        }}
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-x-hidden rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none *:min-w-0 scrollbar-thin data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}

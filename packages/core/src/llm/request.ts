@@ -20,9 +20,27 @@ export function buildLlmRequest(
   schemaName: string,
   maxTokens: number,
   temperature: number,
+  images: string[] = [],
 ): BuiltLlmRequest {
   const cappedMaxTokens = cfg.maxTokensCap ? Math.min(maxTokens, cfg.maxTokensCap) : maxTokens;
-  const messages = [{ role: 'user', content: prompt }];
+
+  // Conteúdo do usuário: texto puro, ou array texto+imagens (visão) por provedor.
+  const anthropicContent = images.length
+    ? [
+        { type: 'text', text: prompt },
+        ...images.map((url) => ({ type: 'image', source: { type: 'url', url } })),
+      ]
+    : prompt;
+  const openaiContent = images.length
+    ? [
+        { type: 'text', text: prompt },
+        ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
+      ]
+    : prompt;
+  const messages =
+    cfg.provider === 'anthropic'
+      ? [{ role: 'user', content: anthropicContent }]
+      : [{ role: 'user', content: openaiContent }];
 
   if (cfg.provider === 'openai') {
     return {

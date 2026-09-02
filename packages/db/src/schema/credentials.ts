@@ -7,14 +7,17 @@ import { workspaces } from './workspaces';
  * `keyId` indica qual master key (env VAULT_MASTER_KEYS) criptografou a linha,
  * permitindo rotação. `maskedHint` são os últimos 4 chars capturados no save,
  * única parte exibida no painel.
+ *
+ * `workspaceId` NULL = credencial da PLATAFORMA (Fase 5): fallback global
+ * usado quando o workspace não tem chave própria (cliente SaaS que não
+ * configura nada). Só admins criam; o AAD do vault usa o escopo fixo
+ * `platform` no lugar do workspaceId.
  */
 export const credentials = pgTable(
   'credentials',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    workspaceId: uuid('workspace_id')
-      .notNull()
-      .references(() => workspaces.id),
+    workspaceId: uuid('workspace_id').references(() => workspaces.id),
     type: text('type', {
       enum: ['wordpress', 'anthropic', 'openai', 'openrouter', 'tavily'],
     }).notNull(),

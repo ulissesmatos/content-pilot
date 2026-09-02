@@ -31,6 +31,7 @@ export class HttpLlmProvider implements LlmProvider {
       req.schemaName,
       req.maxTokens,
       req.temperature,
+      req.images,
     );
 
     const startedAt = Date.now();

@@ -25,6 +25,18 @@ export class VaultError extends Error {
 
 export type MasterKeys = Map<string, Buffer>;
 
+/**
+ * Escopo do AAD para credenciais da plataforma (workspaceId NULL no banco).
+ * Fixo e distinto de qualquer UUID: um ciphertext de plataforma nunca
+ * autentica como credencial de workspace e vice-versa.
+ */
+export const PLATFORM_VAULT_SCOPE = 'platform';
+
+/** Escopo do AAD de uma credencial: o workspaceId dela ou o escopo global. */
+export function credentialVaultScope(workspaceId: string | null | undefined): string {
+  return workspaceId ?? PLATFORM_VAULT_SCOPE;
+}
+
 /** Parseia o env VAULT_MASTER_KEYS ("k1:<b64>,k2:<b64>"). */
 export function parseMasterKeys(raw: string | undefined): MasterKeys {
   if (!raw?.trim()) throw new VaultError('VAULT_MASTER_KEYS não definida');

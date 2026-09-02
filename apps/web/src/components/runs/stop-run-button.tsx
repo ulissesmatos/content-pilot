@@ -3,11 +3,13 @@
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Square } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { cancelRunAction } from '@/actions/runs';
 import { Button } from '@/components/ui/button';
 
 export function StopRunButton({ runId }: { runId: string }) {
+  const t = useTranslations('runDetail');
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -22,8 +24,8 @@ export function StopRunButton({ runId }: { runId: string }) {
           if (result.ok) {
             toast.success(
               result.data.cancelledQueued > 0
-                ? `Execução parada — ${result.data.cancelledQueued} item(ns) pendente(s) cancelado(s). O post em andamento termina e é descartado.`
-                : 'Execução parada.',
+                ? t('stoppedWithQueued', { count: result.data.cancelledQueued })
+                : t('stopped'),
             );
             router.refresh();
           } else {
@@ -33,7 +35,7 @@ export function StopRunButton({ runId }: { runId: string }) {
       }
     >
       <Square className="size-4" />
-      {pending ? 'Parando...' : 'Parar execução'}
+      {pending ? t('stopping') : t('stopRun')}
     </Button>
   );
 }

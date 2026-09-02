@@ -1,6 +1,7 @@
 'use client';
 
 import { LogOut } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { logoutAction } from '@/actions/auth';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -14,12 +15,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export function UserMenu({ email }: { email: string }) {
+  const t = useTranslations('auth');
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="rounded-full" aria-label="Menu do usuário">
+        <Button variant="ghost" size="icon" className="rounded-full" aria-label={email}>
           <Avatar className="size-8">
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
@@ -30,7 +32,7 @@ export function UserMenu({ email }: { email: string }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => logoutAction()}>
           <LogOut className="size-4" />
-          Sair
+          {t('logout')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

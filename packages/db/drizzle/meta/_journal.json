@@ -15,6 +15,27 @@
       "when": 1783339670182,
       "tag": "0001_salty_mathemanic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783595144493,
+      "tag": "0002_exotic_shooting_star",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783879932191,
+      "tag": "0003_married_micromacro",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784286577897,
+      "tag": "0004_happy_galactus",
+      "breakpoints": true
     }
   ]
 }

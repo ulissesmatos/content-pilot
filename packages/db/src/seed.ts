@@ -35,8 +35,13 @@ async function main() {
       email: adminEmail,
       passwordHash,
       name: 'Admin',
+      role: 'admin', // admin da plataforma: sem limites de plano, gerencia credenciais globais
     });
     console.log(`Usuário admin criado: ${adminEmail}`);
+  } else if (existingUser.role !== 'admin') {
+    // instalações antigas: promove o usuário do seed a admin da plataforma
+    await db.update(users).set({ role: 'admin' }).where(eq(users.id, existingUser.id));
+    console.log(`Usuário ${adminEmail} promovido a admin da plataforma.`);
   } else {
     console.log(`Usuário admin já existe: ${adminEmail}`);
   }

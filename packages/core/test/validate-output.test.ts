@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { validateOutput } from '../src/pipeline/validate-output';
 import { gameCodesTemplate } from '../src/templates/seeds/game-codes';
+import { genericArticleTemplate } from '../src/templates/seeds/generic-article';
 import { parseTemplateConfig } from '../src/templates/schema';
 
 const cfg = parseTemplateConfig(gameCodesTemplate.config);
+const genericCfg = parseTemplateConfig(genericArticleTemplate.config);
 
 const GOOD_HTML =
   '<!-- wp:paragraph --><p>Post sobre códigos do jogo com conteúdo suficiente para passar do mínimo de caracteres exigido pela validação. Texto adicional para garantir tamanho, incluindo instruções de resgate e contexto do jogo.</p><!-- /wp:paragraph -->';
@@ -124,5 +126,44 @@ describe('validateOutput — matriz fail-safe', () => {
       const r = validateOutput(baseInput({ newTitle: title }), cfg);
       expect(r.ok).toBe(false);
     }
+  });
+});
+
+describe('validateOutput — links externos (Fase 2)', () => {
+  const HTML_WITH_LINKS =
+    '<!-- wp:paragraph --><p>Um artigo com fonte boa em <a href="https://fonte-real.com/artigo">fonte real</a> ' +
+    'e uma inventada em <a href="https://inventado.com/x">inventada</a>, com texto suficiente para ' +
+    'ultrapassar o mínimo de caracteres exigido pela validação determinística do pipeline.</p><!-- /wp:paragraph -->';
+
+  function genInput(overrides: Record<string, unknown> = {}) {
+    return {
+      hasChanges: true,
+      noDataFound: false,
+      newTitle: 'Um artigo genérico de teste sobre o assunto',
+      updatedHtml: HTML_WITH_LINKS,
+      data: {},
+      searchContext: 'FONTE 1 conteúdo',
+      resultsCount: 3,
+      allowedUrls: ['https://fonte-real.com/artigo'],
+      sanitizeLinks: true,
+      ...overrides,
+    };
+  }
+
+  it('remove link alucinado e mantém o válido no html retornado', () => {
+    const r = validateOutput(genInput(), genericCfg);
+    expect(r.ok).toBe(true);
+    expect(r.externalLinks.kept).toBe(1);
+    expect(r.externalLinks.stripped).toEqual(['https://inventado.com/x']);
+    expect(r.html).toContain('https://fonte-real.com/artigo');
+    expect(r.html).not.toContain('inventado.com');
+    expect(r.html).toContain('inventada'); // texto preservado
+  });
+
+  it('sanitizeLinks=false não mexe nos links (caso update)', () => {
+    const r = validateOutput(genInput({ sanitizeLinks: false }), genericCfg);
+    expect(r.externalLinks.kept).toBe(0);
+    expect(r.externalLinks.stripped).toHaveLength(0);
+    expect(r.html).toContain('inventado.com');
   });
 });

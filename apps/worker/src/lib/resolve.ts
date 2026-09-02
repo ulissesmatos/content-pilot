@@ -9,6 +9,7 @@ import {
   type Db,
 } from '@content-pilot/db';
 import {
+  credentialVaultScope,
   HttpLlmProvider,
   TavilyClient,
   WordPressAdapter,
@@ -37,7 +38,11 @@ export async function resolveSite(db: Db, ref?: string) {
 
 export async function resolveWordPressAdapter(db: Db, site: typeof sites.$inferSelect) {
   if (!site.credentialId) throw new Error(`Site "${site.name}" sem credencial associada.`);
-  const [cred] = await db.select().from(credentials).where(eq(credentials.id, site.credentialId)).limit(1);
+  const [cred] = await db
+    .select()
+    .from(credentials)
+    .where(and(eq(credentials.id, site.credentialId), eq(credentials.workspaceId, site.workspaceId)))
+    .limit(1);
   if (!cred) throw new Error('Credencial do site não encontrada.');
   const wpCreds = decryptSecret<WordPressCredentials>(cred.ciphertext, site.workspaceId, cred.id);
   return new WordPressAdapter(site.baseUrl, wpCreds);
@@ -59,26 +64,55 @@ export async function resolveTemplate(db: Db, workspaceId: string, slugOrId: str
   return { id: row.id, slug: row.slug, config: parseTemplateConfig(row.config) };
 }
 
-export async function resolveTemplateById(db: Db, templateId: string): Promise<{ id: string; slug: string; config: TemplateConfig }> {
-  const [row] = await db.select().from(contentTemplates).where(eq(contentTemplates.id, templateId)).limit(1);
+/** Template por id, restrito ao workspace dono ou builtin — nunca template de outro tenant. */
+export async function resolveTemplateById(db: Db, templateId: string, workspaceId: string): Promise<{ id: string; slug: string; config: TemplateConfig }> {
+  const [row] = await db
+    .select()
+    .from(contentTemplates)
+    .where(
+      and(
+        eq(contentTemplates.id, templateId),
+        or(eq(contentTemplates.workspaceId, workspaceId), isNull(contentTemplates.workspaceId)),
+      ),
+    )
+    .limit(1);
   if (!row) throw new Error(`Template ${templateId} não encontrado.`);
   return { id: row.id, slug: row.slug, config: parseTemplateConfig(row.config) };
 }
 
+/**
+ * Cascata de credenciais (Fase 5): primeiro a chave do próprio workspace
+ * (BYOK); se não houver, cai na credencial da plataforma (workspace NULL).
+ * O cliente SaaS não configura chave nenhuma e tudo funciona.
+ */
 async function firstCredentialOfType(db: Db, workspaceId: string, type: string) {
-  const [cred] = await db
+  const [own] = await db
     .select()
     .from(credentials)
     .where(and(eq(credentials.workspaceId, workspaceId), eq(credentials.type, type as never)))
     .limit(1);
-  return cred ?? null;
+  if (own) return own;
+  const [platform] = await db
+    .select()
+    .from(credentials)
+    .where(and(isNull(credentials.workspaceId), eq(credentials.type, type as never)))
+    .limit(1);
+  return platform ?? null;
+}
+
+function decryptApiKey(cred: { ciphertext: string; workspaceId: string | null; id: string }): string {
+  const { apiKey } = decryptSecret<{ apiKey: string }>(
+    cred.ciphertext,
+    credentialVaultScope(cred.workspaceId),
+    cred.id,
+  );
+  return apiKey;
 }
 
 export async function resolveSearchClient(db: Db, workspaceId: string): Promise<SearchClient> {
   const cred = await firstCredentialOfType(db, workspaceId, 'tavily');
-  if (!cred) throw new Error('Nenhuma credencial Tavily cadastrada — adicione em /credentials.');
-  const { apiKey } = decryptSecret<{ apiKey: string }>(cred.ciphertext, workspaceId, cred.id);
-  return new TavilyClient(apiKey);
+  if (!cred) throw new Error('Nenhuma credencial Tavily disponível (workspace ou plataforma) — adicione em /credentials.');
+  return new TavilyClient(decryptApiKey(cred));
 }
 
 export interface LlmTaskConfig {
@@ -91,20 +125,25 @@ export interface LlmTaskConfig {
 export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
   let cred;
   if (task.credentialId) {
+    // credencial explícita: do workspace ou da plataforma — nunca de outro workspace
     [cred] = await db
       .select()
       .from(credentials)
-      .where(and(eq(credentials.id, task.credentialId), eq(credentials.workspaceId, workspaceId)))
+      .where(
+        and(
+          eq(credentials.id, task.credentialId),
+          or(eq(credentials.workspaceId, workspaceId), isNull(credentials.workspaceId)),
+        ),
+      )
       .limit(1);
   } else {
     cred = await firstCredentialOfType(db, workspaceId, task.provider);
   }
-  if (!cred) throw new Error(`Nenhuma credencial ${task.provider} cadastrada — adicione em /credentials.`);
-  const { apiKey } = decryptSecret<{ apiKey: string }>(cred.ciphertext, workspaceId, cred.id);
+  if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível (workspace ou plataforma) — adicione em /credentials.`);
   return new HttpLlmProvider({
     provider: task.provider,
     model: task.model,
-    apiKey,
+    apiKey: decryptApiKey(cred),
     maxTokensCap: task.maxTokens,
     openrouter: task.provider === 'openrouter' ? { appName: 'Content Pilot' } : undefined,
   });

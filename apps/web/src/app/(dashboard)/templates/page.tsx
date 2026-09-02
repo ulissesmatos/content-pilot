@@ -9,12 +9,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
 
 export const metadata = { title: 'Templates' };
 
 export default async function TemplatesPage() {
   const { workspaceId } = await requireSession();
+  const tr = await getTranslations('templates');
   const rows = await getDb()
     .select()
     .from(contentTemplates)
@@ -23,26 +25,19 @@ export default async function TemplatesPage() {
 
   return (
     <>
-      <PageHeader
-        title="Templates de conteúdo"
-        description="Prompts, buscas, extração de dados e blocos gerenciados — tudo configurável. Clone um builtin para customizar."
-      />
+      <PageHeader title={tr('title')} description={tr('description')} />
       {rows.length === 0 ? (
-        <EmptyState
-          icon={LayoutTemplate}
-          title="Nenhum template"
-          description="Rode o seed do banco (pnpm db:seed) para criar os templates builtin."
-        />
+        <EmptyState icon={LayoutTemplate} title={tr('emptyTitle')} description={tr('emptyDescription')} />
       ) : (
         <Card className="py-0">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Template</TableHead>
-                  <TableHead>Slug</TableHead>
-                  <TableHead>Idiomas</TableHead>
-                  <TableHead>Versão</TableHead>
+                  <TableHead>{tr('colTemplate')}</TableHead>
+                  <TableHead>{tr('colSlug')}</TableHead>
+                  <TableHead>{tr('colLanguages')}</TableHead>
+                  <TableHead>{tr('colVersion')}</TableHead>
                   <TableHead className="w-64" />
                 </TableRow>
               </TableHeader>
@@ -75,7 +70,7 @@ export default async function TemplatesPage() {
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="outline" size="sm" asChild>
-                            <Link href={`/templates/${t.id}`}>{t.isBuiltin ? 'Ver' : 'Editar'}</Link>
+                            <Link href={`/templates/${t.id}`}>{t.isBuiltin ? tr('view') : tr('edit')}</Link>
                           </Button>
                           <CloneTemplateButton id={t.id} />
                           {!t.isBuiltin ? <DeleteTemplateButton id={t.id} name={t.name} /> : null}

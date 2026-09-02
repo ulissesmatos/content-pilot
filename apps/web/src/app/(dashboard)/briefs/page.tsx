@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { ExternalLink, PenLine } from 'lucide-react';
 import { briefs, contentTemplates, getDb, runs, sites } from '@content-pilot/db';
-import { CreateBriefDialog } from '@/components/briefs/create-brief-dialog';
+import { CreateBriefDialog, EditBriefButton, type BriefFormInitial } from '@/components/briefs/create-brief-dialog';
 import {
   DeleteBriefButton,
   PublishBriefButton,
@@ -14,15 +14,16 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
 
-export const metadata = { title: 'Pautas' };
-
-const dateFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+export const metadata = { title: 'Criar posts' };
 
 export default async function BriefsPage() {
   const { workspaceId } = await requireSession();
   const db = getDb();
+  const [t, locale] = await Promise.all([getTranslations('briefs'), getLocale()]);
+  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const [briefRows, siteRows, templateRows] = await Promise.all([
     db
@@ -56,33 +57,41 @@ export default async function BriefsPage() {
 
   const hasActive = briefRows.some((r) => r.brief.status === 'queued' || r.brief.status === 'generating');
 
+  const toInitial = (brief: (typeof briefRows)[number]['brief']): BriefFormInitial => {
+    const llm = (brief.llmConfig ?? {}) as { generate?: { provider?: string; model?: string } };
+    return {
+      id: brief.id,
+      topic: brief.topic,
+      language: brief.language,
+      keywords: (brief.keywords ?? []).join(', '),
+      targetCategoryWpId: brief.targetCategoryWpId ? String(brief.targetCategoryWpId) : '',
+      extraInstructions: brief.extraInstructions ?? '',
+      publishMode: brief.publishMode,
+      provider: llm.generate?.provider ?? 'openrouter',
+      model: llm.generate?.model ?? '',
+    };
+  };
+
   return (
     <>
       <AutoRefresh enabled={hasActive} />
-      <PageHeader
-        title="Pautas"
-        description="Gera artigos novos a partir de um tópico, com pesquisa na web como base factual."
-      >
+      <PageHeader title={t('title')} description={t('description')}>
         <CreateBriefDialog sites={siteRows} templates={templateRows} />
       </PageHeader>
       {briefRows.length === 0 ? (
-        <EmptyState
-          icon={PenLine}
-          title="Nenhuma pauta criada"
-          description="Crie uma pauta com o assunto do artigo — o sistema pesquisa fontes, escreve e salva como rascunho no WordPress."
-        />
+        <EmptyState icon={PenLine} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (
         <Card className="py-0">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tópico</TableHead>
-                  <TableHead>Site</TableHead>
-                  <TableHead>Template</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Criada em</TableHead>
-                  <TableHead>Post</TableHead>
+                  <TableHead>{t('colTopic')}</TableHead>
+                  <TableHead>{t('colSite')}</TableHead>
+                  <TableHead>{t('colTemplate')}</TableHead>
+                  <TableHead>{t('colStatus')}</TableHead>
+                  <TableHead>{t('colCreatedAt')}</TableHead>
+                  <TableHead>{t('colPost')}</TableHead>
                   <TableHead className="w-64" />
                 </TableRow>
               </TableHeader>
@@ -128,11 +137,14 @@ export default async function BriefsPage() {
                         <div className="flex items-center justify-end gap-1">
                           {runId ? (
                             <Link href={`/runs/${runId}`} className="text-muted-foreground text-xs hover:underline">
-                              execução
+                              {t('runLink')}
                             </Link>
                           ) : null}
                           {brief.status === 'failed' ? <RegenerateBriefButton id={brief.id} /> : null}
                           {brief.status === 'ready_for_review' ? <PublishBriefButton id={brief.id} /> : null}
+                          {brief.status === 'pending' || brief.status === 'failed' ? (
+                            <EditBriefButton initial={toInitial(brief)} />
+                          ) : null}
                           <DeleteBriefButton id={brief.id} topic={brief.topic} />
                         </div>
                       </TableCell>

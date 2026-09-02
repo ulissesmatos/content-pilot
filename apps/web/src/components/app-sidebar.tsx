@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import {
+  CreditCard,
   Globe,
   History,
   KeyRound,
@@ -12,6 +14,7 @@ import {
   RefreshCw,
   Rocket,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -27,18 +30,20 @@ import {
 } from '@/components/ui/sidebar';
 
 const NAV_CONTENT = [
-  { title: 'Visão geral', href: '/', icon: LayoutDashboard },
-  { title: 'Jobs de atualização', href: '/jobs', icon: RefreshCw },
-  { title: 'Pautas', href: '/briefs', icon: PenLine },
-  { title: 'Execuções', href: '/runs', icon: History },
-];
+  { key: 'overview', href: '/', icon: LayoutDashboard },
+  { key: 'autopilot', href: '/autopilot', icon: Sparkles, dotClass: 'bg-amber-500' },
+  { key: 'updatePosts', href: '/jobs', icon: RefreshCw, dotClass: 'bg-sky-500' },
+  { key: 'createPosts', href: '/briefs', icon: PenLine, dotClass: 'bg-violet-500' },
+  { key: 'runs', href: '/runs', icon: History },
+] as const;
 
 const NAV_CONFIG = [
-  { title: 'Sites', href: '/sites', icon: Globe },
-  { title: 'Templates', href: '/templates', icon: LayoutTemplate },
-  { title: 'Credenciais', href: '/credentials', icon: KeyRound },
-  { title: 'Configurações', href: '/settings', icon: Settings },
-];
+  { key: 'sites', href: '/sites', icon: Globe },
+  { key: 'templates', href: '/templates', icon: LayoutTemplate },
+  { key: 'credentials', href: '/credentials', icon: KeyRound },
+  { key: 'billing', href: '/billing', icon: CreditCard },
+  { key: 'settings', href: '/settings', icon: Settings },
+] as const;
 
 function isActive(pathname: string, href: string) {
   if (href === '/') return pathname === '/';
@@ -47,6 +52,8 @@ function isActive(pathname: string, href: string) {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const t = useTranslations('nav');
+  const tc = useTranslations('common');
 
   return (
     <Sidebar collapsible="icon">
@@ -59,8 +66,8 @@ export function AppSidebar() {
                   <Rocket className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold">Content Pilot</span>
-                  <span className="text-muted-foreground truncate text-xs">Content ops com IA</span>
+                  <span className="truncate font-semibold">{tc('appName')}</span>
+                  <span className="text-muted-foreground truncate text-xs">{tc('tagline')}</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -69,15 +76,18 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Conteúdo</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('groupContent')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV_CONTENT.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={t(item.key)}>
                     <Link href={item.href}>
                       <item.icon />
-                      <span>{item.title}</span>
+                      <span>{t(item.key)}</span>
+                      {'dotClass' in item && item.dotClass ? (
+                        <span aria-hidden className={`ml-auto size-1.5 rounded-full ${item.dotClass}`} />
+                      ) : null}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -86,15 +96,15 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>Configuração</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('groupSettings')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {NAV_CONFIG.map((item) => (
                 <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(pathname, item.href)} tooltip={t(item.key)}>
                     <Link href={item.href}>
                       <item.icon />
-                      <span>{item.title}</span>
+                      <span>{t(item.key)}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

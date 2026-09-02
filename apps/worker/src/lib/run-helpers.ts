@@ -3,6 +3,7 @@ import {
   count,
   eq,
   gte,
+  inArray,
   llmCalls,
   runItems,
   runs,
@@ -45,7 +46,13 @@ export function makeCachedExtract(db: Db, workspaceId: string, search: SearchCli
       ? await db
           .select()
           .from(sourceCache)
-          .where(and(eq(sourceCache.workspaceId, workspaceId), gte(sourceCache.expiresAt, now)))
+          .where(
+            and(
+              eq(sourceCache.workspaceId, workspaceId),
+              inArray(sourceCache.urlNormalized, normalizedKeys),
+              gte(sourceCache.expiresAt, now),
+            ),
+          )
       : [];
     const cachedByUrl = new Map(cached.map((c) => [c.urlNormalized, c]));
 
@@ -86,7 +93,7 @@ export function makeCachedExtract(db: Db, workspaceId: string, search: SearchCli
   };
 }
 
-/** Registra as chamadas LLM de um item com custo estimado. */
+/** Registra as chamadas LLM de um item com custo estimado (um insert só). */
 export async function recordLlmCalls(
   db: Db,
   workspaceId: string,
@@ -94,23 +101,26 @@ export async function recordLlmCalls(
   runItemId: string | null,
   calls: LlmCallRecord[],
 ) {
-  for (const c of calls) {
-    // custo real do provedor (OpenRouter) quando disponível; senão estimativa por tabela
-    const cost = c.costUsd ?? estimateCostUsd(c.model, c.inputTokens, c.outputTokens);
-    await db.insert(llmCalls).values({
-      workspaceId,
-      runId,
-      runItemId,
-      purpose: c.purpose,
-      provider: c.provider,
-      model: c.model,
-      inputTokens: c.inputTokens,
-      outputTokens: c.outputTokens,
-      costEstimateUsd: cost === null ? null : cost.toFixed(6),
-      durationMs: c.durationMs,
-      status: c.status,
-    });
-  }
+  if (calls.length === 0) return;
+  await db.insert(llmCalls).values(
+    calls.map((c) => {
+      // custo real do provedor (OpenRouter) quando disponível; senão estimativa por tabela
+      const cost = c.costUsd ?? estimateCostUsd(c.model, c.inputTokens, c.outputTokens);
+      return {
+        workspaceId,
+        runId,
+        runItemId,
+        purpose: c.purpose,
+        provider: c.provider,
+        model: c.model,
+        inputTokens: c.inputTokens,
+        outputTokens: c.outputTokens,
+        costEstimateUsd: cost === null ? null : cost.toFixed(6),
+        durationMs: c.durationMs,
+        status: c.status,
+      };
+    }),
+  );
 }
 
 /** Marca o run como concluído quando todos os itens esperados foram registrados. */

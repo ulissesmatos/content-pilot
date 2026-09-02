@@ -1,5 +1,13 @@
 import { briefs, eq, runItems, runs, sites, type Db } from '@content-pilot/db';
-import { jobLlmConfigSchema, runPipeline } from '@content-pilot/core';
+import {
+  checkTopicAlreadyCovered,
+  injectInlineImages,
+  jobLlmConfigSchema,
+  PlanLimitError,
+  runPipeline,
+  slugify,
+  suggestedInlineCount,
+} from '@content-pilot/core';
 import {
   resolveLlmProvider,
   resolveSearchClient,
@@ -7,6 +15,9 @@ import {
   resolveWordPressAdapter,
 } from '../lib/resolve';
 import { makeBudgetGuard, maybeFinalizeRun, recordLlmCalls } from '../lib/run-helpers';
+import { assertPlanAllowsGeneration } from '../lib/plan-guard';
+import { illustratePost } from '../lib/illustrate-post';
+import { createRunLogger } from '../lib/run-logger';
 import type { BriefGeneratePayload } from './names';
 
 /**
@@ -27,8 +38,11 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
   const [brief] = await db.select().from(briefs).where(eq(briefs.id, briefId)).limit(1);
   if (!brief) throw new Error(`brief ${briefId} não existe`);
   const workspaceId = brief.workspaceId;
+  const logger = createRunLogger(db, runId, `[brief ${briefId}]`);
+  const log = logger.log;
 
   await db.update(runs).set({ expectedItems: 1 }).where(eq(runs.id, runId));
+  log(`geração da pauta "${brief.topic}" iniciada`);
 
   const fail = async (error: string) => {
     await db
@@ -44,23 +58,74 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       durationMs: Date.now() - startedAt,
     });
     await maybeFinalizeRun(db, runId);
-    console.error(`[brief ${briefId}] falha: ${error}`);
+    log(`falha: ${error}`);
   };
 
   try {
+    // Enforcement de plano (Fase 5): posts/mês e tokens/mês, antes de gastar IA.
+    try {
+      await assertPlanAllowsGeneration(db, workspaceId);
+    } catch (err) {
+      if (err instanceof PlanLimitError) {
+        await fail(err.message);
+        return;
+      }
+      throw err;
+    }
+
     await db.update(briefs).set({ status: 'generating', updatedAt: new Date() }).where(eq(briefs.id, briefId));
 
     const [site] = await db.select().from(sites).where(eq(sites.id, brief.siteId)).limit(1);
     if (!site) throw new Error('site da pauta não existe');
 
     const llmConfig = jobLlmConfigSchema.parse(brief.llmConfig ?? {});
+    const tokenBudget = llmConfig.tokenBudget ?? 500_000;
+    const checkBudget = makeBudgetGuard(db, runId, tokenBudget);
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
-      resolveTemplateById(db, brief.templateId),
+      resolveTemplateById(db, brief.templateId, workspaceId),
       resolveSearchClient(db, workspaceId),
       resolveLlmProvider(db, workspaceId, llmConfig.generate),
       resolveLlmProvider(db, workspaceId, llmConfig.verify),
     ]);
+
+    // Anti-repetição: se o tema já foi coberto (posts do WP ou outra pauta que
+    // gerou/está gerando conteúdo), não gera de novo — antes de gastar busca + IA.
+    const [wpTitles, workspaceBriefs] = await Promise.all([
+      wp.listRecentPostTitles(150).catch((err) => {
+        log(`listRecentPostTitles falhou (guard segue só com pautas): ${err}`);
+        return [] as Awaited<ReturnType<typeof wp.listRecentPostTitles>>;
+      }),
+      db
+        .select({ id: briefs.id, topic: briefs.topic, status: briefs.status })
+        .from(briefs)
+        .where(eq(briefs.workspaceId, workspaceId)),
+    ]);
+    const existingTitles = [
+      ...wpTitles.map((p) => p.title),
+      ...workspaceBriefs
+        .filter((b) => b.id !== briefId && ['generating', 'ready_for_review', 'published'].includes(b.status))
+        .map((b) => b.topic),
+    ].filter(Boolean);
+    const guard = await checkTopicAlreadyCovered(
+      { topic: brief.topic, existingTitles, language: brief.language },
+      { llm: llmVerify, checkBudget, log },
+    );
+    if (guard.llmCalls.length > 0) await recordLlmCalls(db, workspaceId, runId, null, guard.llmCalls);
+    if (guard.covered) {
+      await fail(
+        `Tema já coberto por conteúdo existente${guard.matchedTitle ? `: "${guard.matchedTitle}"` : ''} — geração pulada para evitar post repetido.`,
+      );
+      return;
+    }
+
+    // Categorias reais do site — só quando o template pede que o LLM escolha (Fase 2).
+    const siteCategories = template.config.seo.chooseCategory
+      ? await wp.listCategories().catch((err) => {
+          log(`listCategories falhou: ${err}`);
+          return [] as Awaited<ReturnType<typeof wp.listCategories>>;
+        })
+      : [];
 
     const keywords = brief.keywords?.length ? `Palavras-chave alvo: ${brief.keywords.join(', ')}.` : '';
     const extra = [keywords, brief.extraInstructions ?? ''].filter(Boolean).join('\n');
@@ -72,24 +137,21 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         template: template.config,
         language: brief.language,
         siteName: site.name,
+        siteBaseUrl: site.baseUrl,
+        availableCategories: siteCategories.map((c) => c.name),
         topicOverride: brief.topic,
         extraInstructions: extra,
         post: {
           title: brief.topic,
-          slug: brief.topic
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[̀-ͯ]/g, '')
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/(^-|-$)/g, ''),
+          slug: slugify(brief.topic),
         },
       },
       {
         llmGenerate,
         llmVerify,
         search,
-        checkBudget: makeBudgetGuard(db, runId, 500_000),
-        log: (msg) => console.log(`[brief ${briefId}] ${msg}`),
+        checkBudget,
+        log,
       },
     );
 
@@ -124,12 +186,46 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       return;
     }
 
+    // Categoria escolhida pelo LLM (nome já validado contra as reais) → ID do WP.
+    // Cai na categoria-alvo da pauta se o LLM não escolheu ou não bateu.
+    const chosenCategoryId = result.category
+      ? siteCategories.find((c) => c.name.toLowerCase() === result.category!.toLowerCase())?.id
+      : undefined;
+    const categoryId = chosenCategoryId ?? brief.targetCategoryWpId ?? undefined;
+
+    // Imagens (Fase 3): capa + imagens do corpo, só quando o template pede.
+    // Reusa o modelo de geração para a visão (precisa suportar imagens; senão,
+    // post sem imagem). A quantidade de imagens do corpo escala com o texto.
+    let featuredMediaId: number | undefined;
+    let finalHtml = result.finalHtml;
+    if (template.config.images.enabled) {
+      const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
+      const { mediaId, inlineImages, llmCalls } = await illustratePost({
+        wp,
+        llmVision: llmGenerate,
+        topic: brief.topic,
+        keywords: brief.keywords ?? [],
+        language: brief.language,
+        candidates: template.config.images.candidates,
+        inlineCount,
+        search,
+        webSearch: template.config.images.webSearch,
+        checkBudget,
+        log,
+      });
+      featuredMediaId = mediaId ?? undefined;
+      if (inlineImages.length > 0) finalHtml = injectInlineImages(finalHtml, inlineImages);
+      result.llmCalls.push(...llmCalls); // registra os tokens da visão no run
+    }
+
     const created = await wp.createPost({
       title: result.newTitle ?? brief.topic,
-      content: result.finalHtml,
+      content: finalHtml,
       status: brief.publishMode,
-      categories: brief.targetCategoryWpId ? [brief.targetCategoryWpId] : undefined,
-      excerpt: result.changesSummary ?? undefined,
+      categories: categoryId ? [categoryId] : undefined,
+      featuredMediaId,
+      // meta description SEO como excerpt do WP; cai no resumo de mudanças.
+      excerpt: result.metaDescription || result.changesSummary || undefined,
     });
 
     const [item] = await db
@@ -164,10 +260,10 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       .where(eq(briefs.id, briefId));
 
     await maybeFinalizeRun(db, runId);
-    console.log(
-      `[brief ${briefId}] post #${created.id} criado (${brief.publishMode}) em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
-    );
+    log(`post #${created.id} criado (${brief.publishMode}) em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
   } catch (err) {
     await fail(err instanceof Error ? err.message : String(err));
+  } finally {
+    await logger.flush();
   }
 }

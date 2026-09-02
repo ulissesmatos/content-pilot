@@ -21,6 +21,8 @@ export type LlmTask = z.infer<typeof llmTaskSchema>;
 export const jobLlmConfigSchema = z.object({
   generate: llmTaskSchema,
   verify: llmTaskSchema,
+  /** Orçamento de tokens desta geração (pauta). Ausente = default do worker. */
+  tokenBudget: z.number().int().positive().optional(),
 });
 export type JobLlmConfig = z.infer<typeof jobLlmConfigSchema>;
 

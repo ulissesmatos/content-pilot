@@ -16,6 +16,7 @@ import {
   resolveWordPressAdapter,
 } from '../lib/resolve';
 import { makeBudgetGuard, makeCachedExtract, maybeFinalizeRun, recordLlmCalls } from '../lib/run-helpers';
+import { createRunLogger } from '../lib/run-logger';
 import type { PostProcessPayload } from './names';
 
 const STATUS_MAP: Record<PipelineResult['status'], string> = {
@@ -55,6 +56,8 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
   const [site] = await db.select().from(sites).where(eq(sites.id, job.siteId)).limit(1);
   if (!site) throw new Error(`site do job não existe`);
   const workspaceId = job.workspaceId;
+  const logger = createRunLogger(db, runId, `[post ${wpPostId}]`);
+  const log = logger.log;
 
   const record = async (
     status: string,
@@ -93,7 +96,7 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
 
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
-      resolveTemplateById(db, job.templateId),
+      resolveTemplateById(db, job.templateId, workspaceId),
       resolveSearchClient(db, workspaceId),
       resolveLlmProvider(db, workspaceId, llmConfig.generate),
       resolveLlmProvider(db, workspaceId, llmConfig.verify),
@@ -129,7 +132,7 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
           if (!limits.skipIfSourcesUnchanged) return false;
           return state?.hash === hash;
         },
-        log: (msg) => console.log(`[post ${wpPostId}] ${msg}`),
+        log,
       },
     );
 
@@ -148,6 +151,7 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
       } catch (err) {
         finalStatus = 'wp_failed';
         wpError = `falha ao publicar no WordPress: ${err instanceof Error ? err.message : String(err)}`;
+        log(wpError);
       }
     }
 
@@ -179,10 +183,12 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
       previousContentBackup: backup,
       error: wpError,
     });
-    console.log(`[post ${wpPostId}] ${finalStatus} (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
+    log(`${finalStatus} (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[post ${wpPostId}] falha:`, message);
+    log(`falha: ${message}`);
     await record('failed', {}, { error: message });
+  } finally {
+    await logger.flush();
   }
 }

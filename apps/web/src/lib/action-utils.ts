@@ -5,10 +5,19 @@ export type ActionResult<T = null> =
   | { ok: true; data: T }
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
 
+/** Violação de FK do Postgres (23503) — inclusive embrulhada pelo drizzle. */
+export function isFkViolation(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === '23503') return true;
+  return isFkViolation((err as { cause?: unknown }).cause);
+}
+
 interface SessionInfo {
   userId: string;
   workspaceId: string;
   email: string;
+  role: 'owner' | 'admin';
 }
 
 /**

@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { createBriefAction } from '@/actions/briefs';
+import { createBriefAction, updateBriefAction } from '@/actions/briefs';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -25,47 +25,90 @@ interface Option {
   name: string;
 }
 
+/** Valores iniciais para o modo edição. */
+export interface BriefFormInitial {
+  id: string;
+  topic: string;
+  language: string;
+  keywords: string;
+  targetCategoryWpId: string;
+  extraInstructions: string;
+  publishMode: 'draft' | 'publish';
+  provider: string;
+  model: string;
+}
+
 const LANGUAGES = [
   { value: 'pt-BR', label: 'Português (Brasil)' },
   { value: 'en-US', label: 'English (US)' },
   { value: 'es-ES', label: 'Español (España)' },
 ];
 
-export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templates: Option[] }) {
+function BriefDialog({
+  sites,
+  templates,
+  initial,
+  trigger,
+}: {
+  sites: Option[];
+  templates: Option[];
+  initial?: BriefFormInitial;
+  trigger: ReactNode;
+}) {
   const router = useRouter();
+  const isEdit = !!initial;
   const [open, setOpen] = useState(false);
   const [siteId, setSiteId] = useState('');
   const [templateId, setTemplateId] = useState('');
-  const [language, setLanguage] = useState('pt-BR');
-  const [publishMode, setPublishMode] = useState<'draft' | 'publish'>('draft');
-  const [provider, setProvider] = useState('openrouter');
+  const [language, setLanguage] = useState(initial?.language ?? 'pt-BR');
+  const [publishMode, setPublishMode] = useState<'draft' | 'publish'>(initial?.publishMode ?? 'draft');
+  const [provider, setProvider] = useState(initial?.provider ?? 'openrouter');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
 
-  const disabled = sites.length === 0 || templates.length === 0;
+  const disabled = !isEdit && (sites.length === 0 || templates.length === 0);
 
   function submit(formData: FormData) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     startTransition(async () => {
-      const result = await createBriefAction({
-        topic: formData.get('topic'),
-        siteId,
-        templateId,
-        language,
-        keywords: formData.get('keywords') ?? '',
-        targetCategoryWpId: formData.get('categoryId') ?? '',
-        extraInstructions: formData.get('extraInstructions') ?? '',
-        publishMode,
-        provider,
-        model: formData.get('model'),
-      });
-      if (result.ok) {
-        toast.success('Pauta criada — geração iniciada.');
-        setFieldErrors({});
-        setOpen(false);
-        router.push(`/runs/${result.data.runId}`);
-      } else {
-        setFieldErrors(result.fieldErrors ?? {});
-        toast.error(result.error);
+      try {
+        const shared = {
+          topic: formData.get('topic'),
+          language,
+          keywords: formData.get('keywords') ?? '',
+          targetCategoryWpId: formData.get('categoryId') ?? '',
+          extraInstructions: formData.get('extraInstructions') ?? '',
+          publishMode,
+          provider,
+          model: formData.get('model'),
+        };
+        if (isEdit) {
+          const result = await updateBriefAction({ ...shared, id: initial.id });
+          if (result.ok) {
+            toast.success('Pauta atualizada.');
+            setFieldErrors({});
+            setOpen(false);
+            router.refresh();
+          } else {
+            setFieldErrors(result.fieldErrors ?? {});
+            toast.error(result.error);
+          }
+          return;
+        }
+        const result = await createBriefAction({ ...shared, siteId, templateId });
+        if (result.ok) {
+          toast.success('Pauta criada — geração iniciada.');
+          setFieldErrors({});
+          setOpen(false);
+          router.push(`/runs/${result.data.runId}`);
+        } else {
+          setFieldErrors(result.fieldErrors ?? {});
+          toast.error(result.error);
+        }
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
@@ -74,59 +117,64 @@ export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templ
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="size-4" />
-          Nova pauta
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Nova pauta</DialogTitle>
+          <DialogTitle>{isEdit ? 'Editar pauta' : 'Nova pauta'}</DialogTitle>
           <DialogDescription>
             {disabled
               ? 'Cadastre um site e tenha ao menos um template antes de criar pautas.'
-              : 'O artigo é escrito com base em fontes reais pesquisadas na web e criado no WordPress.'}
+              : isEdit
+                ? 'A pauta ainda não gerou post — ajuste e regere quando quiser.'
+                : 'O artigo é escrito com base em fontes reais pesquisadas na web e criado no WordPress.'}
           </DialogDescription>
         </DialogHeader>
         <form action={submit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="brief-topic">Tópico / assunto</Label>
-            <Input id="brief-topic" name="topic" placeholder='ex.: códigos de "Anime Vanguards"' required />
+            <Input
+              id="brief-topic"
+              name="topic"
+              placeholder='ex.: códigos de "Anime Vanguards"'
+              defaultValue={initial?.topic}
+              required
+            />
             {err('topic') ? <p className="text-destructive text-xs">{err('topic')}</p> : null}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Site</Label>
-              <Select value={siteId} onValueChange={setSiteId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {!isEdit ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Site</Label>
+                <Select value={siteId} onValueChange={setSiteId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sites.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Template</Label>
+                <Select value={templateId} onValueChange={setTemplateId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Template</Label>
-              <Select value={templateId} onValueChange={setTemplateId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Idioma</Label>
@@ -145,12 +193,17 @@ export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templ
             </div>
             <div className="space-y-2">
               <Label htmlFor="brief-category">ID da categoria WP (opcional)</Label>
-              <Input id="brief-category" name="categoryId" placeholder="ex.: 5" />
+              <Input id="brief-category" name="categoryId" placeholder="ex.: 5" defaultValue={initial?.targetCategoryWpId} />
             </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="brief-keywords">Palavras-chave (opcional, separadas por vírgula)</Label>
-            <Input id="brief-keywords" name="keywords" placeholder="ex.: códigos anime vanguards, resgatar" />
+            <Input
+              id="brief-keywords"
+              name="keywords"
+              placeholder="ex.: códigos anime vanguards, resgatar"
+              defaultValue={initial?.keywords}
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="brief-extra">Instruções extras (opcional)</Label>
@@ -159,6 +212,7 @@ export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templ
               name="extraInstructions"
               rows={3}
               placeholder="ex.: foque em jogadores iniciantes; mencione a atualização de julho"
+              defaultValue={initial?.extraInstructions}
             />
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -189,16 +243,52 @@ export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templ
             </div>
             <div className="space-y-2">
               <Label htmlFor="brief-model">Modelo</Label>
-              <Input id="brief-model" name="model" defaultValue="z-ai/glm-5.2" className="font-mono text-sm" required />
+              <Input
+                id="brief-model"
+                name="model"
+                defaultValue={initial?.model ?? 'z-ai/glm-5.2'}
+                className="font-mono text-sm"
+                required
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={pending || disabled || !siteId || !templateId}>
-              {pending ? 'Criando...' : 'Criar e gerar'}
+            <Button type="submit" disabled={pending || disabled || (!isEdit && (!siteId || !templateId))}>
+              {pending ? 'Salvando...' : isEdit ? 'Salvar alterações' : 'Criar e gerar'}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function CreateBriefDialog({ sites, templates }: { sites: Option[]; templates: Option[] }) {
+  return (
+    <BriefDialog
+      sites={sites}
+      templates={templates}
+      trigger={
+        <Button>
+          <Plus className="size-4" />
+          Nova pauta
+        </Button>
+      }
+    />
+  );
+}
+
+export function EditBriefButton({ initial }: { initial: BriefFormInitial }) {
+  return (
+    <BriefDialog
+      sites={[]}
+      templates={[]}
+      initial={initial}
+      trigger={
+        <Button variant="ghost" size="icon" aria-label={`Editar ${initial.topic}`}>
+          <Pencil className="size-4" />
+        </Button>
+      }
+    />
   );
 }

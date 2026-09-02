@@ -9,7 +9,7 @@ export const runItems = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     runId: uuid('run_id')
       .notNull()
-      .references(() => runs.id),
+      .references(() => runs.id, { onDelete: 'cascade' }),
     workspaceId: uuid('workspace_id')
       .notNull()
       .references(() => workspaces.id),

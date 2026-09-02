@@ -15,7 +15,7 @@ export const postSourceState = pgTable(
       .references(() => workspaces.id),
     jobId: uuid('job_id')
       .notNull()
-      .references(() => contentJobs.id),
+      .references(() => contentJobs.id, { onDelete: 'cascade' }),
     wpPostId: integer('wp_post_id').notNull(),
     lastSourcesHash: text('last_sources_hash').notNull(),
     /** Dados extraídos publicados na última atualização — base da pré-checagem sem IA do modo eco. */

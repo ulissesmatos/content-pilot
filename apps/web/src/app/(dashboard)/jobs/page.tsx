@@ -1,23 +1,25 @@
-import { desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { RefreshCw } from 'lucide-react';
-import { contentJobs, contentTemplates, getDb, sites } from '@content-pilot/db';
-import { CreateJobDialog } from '@/components/jobs/create-job-dialog';
+import { contentJobs, contentTemplates, credentials, getDb, sites } from '@content-pilot/db';
+import { jobLimitsSchema, jobLlmConfigSchema, postFilterSchema } from '@content-pilot/core';
+import { CreateJobDialog, EditJobButton, type JobFormInitial } from '@/components/jobs/create-job-dialog';
 import { DeleteJobButton, JobEnabledSwitch, RunNowButton } from '@/components/jobs/job-row-actions';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
 
-export const metadata = { title: 'Jobs de atualização' };
-
-const dateFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+export const metadata = { title: 'Atualizar posts' };
 
 export default async function JobsPage() {
   const { workspaceId } = await requireSession();
   const db = getDb();
+  const [t, locale] = await Promise.all([getTranslations('jobs'), getLocale()]);
+  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
-  const [jobs, siteRows, templateRows] = await Promise.all([
+  const [jobs, siteRows, templateRows, wpCredentialRows] = await Promise.all([
     db
       .select({
         job: contentJobs,
@@ -34,34 +36,58 @@ export default async function JobsPage() {
       .select({ id: contentTemplates.id, name: contentTemplates.name })
       .from(contentTemplates)
       .where(or(isNull(contentTemplates.workspaceId), eq(contentTemplates.workspaceId, workspaceId))),
+    db
+      .select({ id: credentials.id, name: credentials.name })
+      .from(credentials)
+      .where(and(eq(credentials.workspaceId, workspaceId), eq(credentials.type, 'wordpress'))),
   ]);
+
+  const toInitial = (job: (typeof jobs)[number]['job']): JobFormInitial => {
+    const filter = postFilterSchema.parse(job.postFilter ?? {});
+    const limits = jobLimitsSchema.parse(job.limits ?? {});
+    // tolerante a llmConfig malformado — o form abre com defaults em vez de derrubar a página
+    const llmParsed = jobLlmConfigSchema.safeParse(job.llmConfig ?? {});
+    const llm = llmParsed.success
+      ? llmParsed.data
+      : { generate: { provider: 'anthropic' as const, model: 'claude-haiku-4-5' } };
+    return {
+      id: job.id,
+      name: job.name,
+      siteId: job.siteId,
+      templateId: job.templateId,
+      scheduleCron: job.scheduleCron,
+      language: job.language ?? '',
+      tags: filter.tags.join(', '),
+      categories: filter.categories.join(', '),
+      provider: llm.generate.provider,
+      model: llm.generate.model,
+      maxPostsPerRun: limits.maxPostsPerRun,
+      tokenBudgetPerRun: limits.tokenBudgetPerRun,
+      skipIfSourcesUnchanged: limits.skipIfSourcesUnchanged,
+      mode: limits.mode,
+      searchDepth: limits.searchDepth,
+    };
+  };
 
   return (
     <>
-      <PageHeader
-        title="Jobs de atualização"
-        description="Atualização periódica de posts por categoria/tag. O worker verifica os agendamentos a cada minuto."
-      >
-        <CreateJobDialog sites={siteRows} templates={templateRows} />
+      <PageHeader title={t('title')} description={t('description')}>
+        <CreateJobDialog sites={siteRows} templates={templateRows} wordpressCredentials={wpCredentialRows} />
       </PageHeader>
       {jobs.length === 0 ? (
-        <EmptyState
-          icon={RefreshCw}
-          title="Nenhum job configurado"
-          description="Crie um job apontando para um site e um template para manter seus posts atualizados automaticamente."
-        />
+        <EmptyState icon={RefreshCw} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (
         <Card className="py-0">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Job</TableHead>
-                  <TableHead>Site</TableHead>
-                  <TableHead>Template</TableHead>
-                  <TableHead>Cron</TableHead>
-                  <TableHead>Próxima execução</TableHead>
-                  <TableHead>Ativo</TableHead>
+                  <TableHead>{t('colJob')}</TableHead>
+                  <TableHead>{t('colSite')}</TableHead>
+                  <TableHead>{t('colTemplate')}</TableHead>
+                  <TableHead>{t('colCron')}</TableHead>
+                  <TableHead>{t('colNextRun')}</TableHead>
+                  <TableHead>{t('colEnabled')}</TableHead>
                   <TableHead className="w-56" />
                 </TableRow>
               </TableHeader>
@@ -81,6 +107,7 @@ export default async function JobsPage() {
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
                         <RunNowButton id={job.id} />
+                        <EditJobButton sites={siteRows} templates={templateRows} initial={toInitial(job)} />
                         <DeleteJobButton id={job.id} name={job.name} />
                       </div>
                     </TableCell>

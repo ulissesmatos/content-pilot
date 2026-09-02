@@ -5,7 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { credentials, getDb, sites } from '@content-pilot/db';
 import { WordPressAdapter, type WordPressCredentials, type CmsConnectionResult } from '@content-pilot/core';
 import { z } from 'zod';
-import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { isFkViolation, runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { getWorkspacePlan } from '@/lib/billing';
 import { decryptSecret } from '@/lib/vault';
 
 const createSiteSchema = z.object({
@@ -23,6 +24,19 @@ const createSiteSchema = z.object({
 export async function createSiteAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(createSiteSchema, input, async (data, { workspaceId }) => {
     const db = getDb();
+
+    // limite de sites do plano (Fase 5)
+    const plan = await getWorkspacePlan(workspaceId);
+    const existing = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(eq(sites.workspaceId, workspaceId));
+    if (existing.length >= plan.limits.maxSites) {
+      throw new Error(
+        `Seu plano permite ${plan.limits.maxSites} site(s). Faça upgrade em Plano e cobrança para conectar mais.`,
+      );
+    }
+
     const [cred] = await db
       .select({ id: credentials.id, type: credentials.type })
       .from(credentials)
@@ -52,9 +66,16 @@ const idSchema = z.object({ id: z.string().uuid() });
 
 export async function deleteSiteAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    await getDb()
-      .delete(sites)
-      .where(and(eq(sites.id, id), eq(sites.workspaceId, workspaceId)));
+    try {
+      await getDb()
+        .delete(sites)
+        .where(and(eq(sites.id, id), eq(sites.workspaceId, workspaceId)));
+    } catch (err) {
+      if (isFkViolation(err)) {
+        throw new Error('Este site tem jobs, pautas ou autopilots apontando para ele — exclua-os primeiro.');
+      }
+      throw err;
+    }
     revalidatePath('/sites');
     return null;
   });

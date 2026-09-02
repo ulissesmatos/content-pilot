@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Globe, RotateCcw, Trash2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { deleteBriefAction, publishBriefAction, regenerateBriefAction } from '@/actions/briefs';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 
 export function RegenerateBriefButton({ id }: { id: string }) {
+  const t = useTranslations('briefs');
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
@@ -28,7 +30,7 @@ export function RegenerateBriefButton({ id }: { id: string }) {
         startTransition(async () => {
           const result = await regenerateBriefAction({ id });
           if (result.ok) {
-            toast.success('Regeração iniciada.');
+            toast.success(t('regenerateStarted'));
             router.push(`/runs/${result.data.runId}`);
           } else {
             toast.error(result.error);
@@ -37,12 +39,13 @@ export function RegenerateBriefButton({ id }: { id: string }) {
       }
     >
       <RotateCcw className="size-4" />
-      {pending ? 'Enviando...' : 'Regerar'}
+      {pending ? t('regenerating') : t('regenerate')}
     </Button>
   );
 }
 
 export function PublishBriefButton({ id }: { id: string }) {
+  const t = useTranslations('briefs');
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   return (
@@ -50,19 +53,17 @@ export function PublishBriefButton({ id }: { id: string }) {
       <DialogTrigger asChild>
         <Button size="sm">
           <Globe className="size-4" />
-          Publicar
+          {t('publish')}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Publicar no site</DialogTitle>
-          <DialogDescription>
-            O rascunho ficará visível publicamente no WordPress. Revise o conteúdo antes.
-          </DialogDescription>
+          <DialogTitle>{t('publishTitle')}</DialogTitle>
+          <DialogDescription>{t('publishDescription')}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-            Cancelar
+            {t('cancel')}
           </Button>
           <Button
             disabled={pending}
@@ -70,7 +71,7 @@ export function PublishBriefButton({ id }: { id: string }) {
               startTransition(async () => {
                 const result = await publishBriefAction({ id });
                 if (result.ok) {
-                  toast.success('Post publicado no site.');
+                  toast.success(t('published'));
                   setOpen(false);
                 } else {
                   toast.error(result.error);
@@ -78,7 +79,7 @@ export function PublishBriefButton({ id }: { id: string }) {
               })
             }
           >
-            {pending ? 'Publicando...' : 'Publicar agora'}
+            {pending ? t('publishing') : t('publishNow')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -87,25 +88,24 @@ export function PublishBriefButton({ id }: { id: string }) {
 }
 
 export function DeleteBriefButton({ id, topic }: { id: string; topic: string }) {
+  const t = useTranslations('briefs');
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={`Excluir ${topic}`}>
+        <Button variant="ghost" size="icon" aria-label={`${t('deleteTitle')}: ${topic}`}>
           <Trash2 className="size-4" />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Excluir pauta</DialogTitle>
-          <DialogDescription>
-            Excluir &quot;{topic}&quot;? O post criado no WordPress (se houver) não é afetado.
-          </DialogDescription>
+          <DialogTitle>{t('deleteTitle')}</DialogTitle>
+          <DialogDescription>{t('deleteDescription', { topic })}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-            Cancelar
+            {t('cancel')}
           </Button>
           <Button
             variant="destructive"
@@ -114,7 +114,7 @@ export function DeleteBriefButton({ id, topic }: { id: string; topic: string }) 
               startTransition(async () => {
                 const result = await deleteBriefAction({ id });
                 if (result.ok) {
-                  toast.success('Pauta excluída.');
+                  toast.success(t('deleted'));
                   setOpen(false);
                 } else {
                   toast.error(result.error);
@@ -122,7 +122,7 @@ export function DeleteBriefButton({ id, topic }: { id: string; topic: string }) 
               })
             }
           >
-            {pending ? 'Excluindo...' : 'Excluir'}
+            {pending ? t('deleting') : t('deleteConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

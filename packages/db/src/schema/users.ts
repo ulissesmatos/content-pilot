@@ -9,5 +9,10 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   name: text('name'),
+  /**
+   * owner = dono de workspace (cliente SaaS); admin = operador da plataforma
+   * (sem limites de plano, gerencia credenciais globais).
+   */
+  role: text('role', { enum: ['owner', 'admin'] }).notNull().default('owner'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

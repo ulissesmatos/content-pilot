@@ -14,8 +14,9 @@ export const authConfig = {
   callbacks: {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user;
-      const isOnLogin = nextUrl.pathname.startsWith('/login');
-      if (isOnLogin) {
+      const isPublic =
+        nextUrl.pathname.startsWith('/login') || nextUrl.pathname.startsWith('/register');
+      if (isPublic) {
         if (isLoggedIn) return Response.redirect(new URL('/', nextUrl));
         return true;
       }
@@ -25,12 +26,14 @@ export const authConfig = {
       if (user) {
         token.userId = user.id;
         token.workspaceId = (user as { workspaceId?: string }).workspaceId;
+        token.role = (user as { role?: 'owner' | 'admin' }).role ?? 'owner';
       }
       return token;
     },
     session({ session, token }) {
       if (token.userId) session.user.id = token.userId as string;
       (session.user as { workspaceId?: string }).workspaceId = token.workspaceId as string;
+      (session.user as { role?: 'owner' | 'admin' }).role = (token.role as 'owner' | 'admin') ?? 'owner';
       return session;
     },
   },

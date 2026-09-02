@@ -1,12 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, briefs, credentials, eq, getDb, runs, sites } from '@content-pilot/db';
-import { jobLlmConfigSchema, WordPressAdapter, type WordPressCredentials } from '@content-pilot/core';
+import { and, briefs, eq, getDb, runs, sites } from '@content-pilot/db';
+import { jobLlmConfigSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
 import { getBoss } from '@/lib/boss';
-import { decryptSecret } from '@/lib/vault';
+import { assertTemplateAccessible } from '@/lib/tenant';
+import { getWordPressForSite } from '@/lib/wp';
 
 const createBriefSchema = z.object({
   topic: z.string().min(3, 'Tópico muito curto').max(200),
@@ -31,7 +32,7 @@ async function enqueueBriefGeneration(briefId: string, workspaceId: string): Pro
   const db = getDb();
   const [run] = await db
     .insert(runs)
-    .values({ workspaceId, briefId, trigger: 'manual', status: 'running' })
+    .values({ workspaceId, briefId, kind: 'create', trigger: 'manual', status: 'running' })
     .returning({ id: runs.id });
 
   const boss = await getBoss();
@@ -59,6 +60,7 @@ export async function createBriefAction(input: unknown): Promise<ActionResult<{ 
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
     if (!site) throw new Error('Site não encontrado.');
+    await assertTemplateAccessible(data.templateId, workspaceId);
 
     const llmTask = { provider: data.provider, model: data.model };
     const keywords = data.keywords
@@ -91,6 +93,55 @@ export async function createBriefAction(input: unknown): Promise<ActionResult<{ 
 
 const idSchema = z.object({ id: z.string().uuid() });
 
+const updateBriefSchema = createBriefSchema.omit({ siteId: true, templateId: true }).extend({ id: z.string().uuid() });
+
+/**
+ * Edita uma pauta que ainda não virou post (pending/failed). Site e template
+ * não mudam — para isso, exclua e crie outra.
+ */
+export async function updateBriefAction(input: unknown): Promise<ActionResult<{ id: string }>> {
+  return runAuthedAction(updateBriefSchema, input, async (data, { workspaceId }) => {
+    const db = getDb();
+    const [brief] = await db
+      .select()
+      .from(briefs)
+      .where(and(eq(briefs.id, data.id), eq(briefs.workspaceId, workspaceId)))
+      .limit(1);
+    if (!brief) throw new Error('Pauta não encontrada.');
+    if (brief.status !== 'pending' && brief.status !== 'failed') {
+      throw new Error('Só pautas pendentes ou com falha podem ser editadas — depois de gerado, edite o post no WordPress.');
+    }
+
+    const llmTask = { provider: data.provider, model: data.model };
+    const existingLlm = (brief.llmConfig ?? {}) as { tokenBudget?: number };
+    const keywords = data.keywords
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    await db
+      .update(briefs)
+      .set({
+        topic: data.topic.trim(),
+        keywords,
+        language: data.language,
+        targetCategoryWpId: data.targetCategoryWpId,
+        extraInstructions: data.extraInstructions.trim() || null,
+        publishMode: data.publishMode,
+        llmConfig: jobLlmConfigSchema.parse({
+          generate: llmTask,
+          verify: llmTask,
+          tokenBudget: existingLlm.tokenBudget,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(briefs.id, data.id));
+
+    revalidatePath('/briefs');
+    return { id: data.id };
+  });
+}
+
 /** Regera uma pauta que falhou (pautas com post criado não regeram — evita duplicar posts no WP). */
 export async function regenerateBriefAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
@@ -116,23 +167,18 @@ export async function regenerateBriefAction(input: unknown): Promise<ActionResul
 export async function publishBriefAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
     const db = getDb();
-    const [row] = await db
-      .select({ brief: briefs, site: sites })
+    const [brief] = await db
+      .select()
       .from(briefs)
-      .innerJoin(sites, eq(briefs.siteId, sites.id))
       .where(and(eq(briefs.id, id), eq(briefs.workspaceId, workspaceId)))
       .limit(1);
-    if (!row) throw new Error('Pauta não encontrada.');
-    if (row.brief.status !== 'ready_for_review' || !row.brief.createdWpPostId) {
+    if (!brief) throw new Error('Pauta não encontrada.');
+    if (brief.status !== 'ready_for_review' || !brief.createdWpPostId) {
       throw new Error('Esta pauta não tem rascunho aguardando publicação.');
     }
-    if (!row.site.credentialId) throw new Error('Site sem credencial.');
 
-    const [cred] = await db.select().from(credentials).where(eq(credentials.id, row.site.credentialId)).limit(1);
-    if (!cred) throw new Error('Credencial do site não encontrada.');
-    const wpCreds = decryptSecret<WordPressCredentials>(cred.ciphertext, workspaceId, cred.id);
-    const wp = new WordPressAdapter(row.site.baseUrl, wpCreds);
-    await wp.updatePost(row.brief.createdWpPostId, { status: 'publish' });
+    const wp = await getWordPressForSite(workspaceId, brief.siteId);
+    await wp.updatePost(brief.createdWpPostId, { status: 'publish' });
 
     await db.update(briefs).set({ status: 'published', updatedAt: new Date() }).where(eq(briefs.id, id));
     revalidatePath('/briefs');
@@ -152,12 +198,10 @@ export async function deleteBriefAction(input: unknown): Promise<ActionResult> {
     if (generating.status === 'generating' || generating.status === 'queued') {
       throw new Error('Aguarde a geração terminar (ou pare a execução) antes de excluir.');
     }
-    try {
-      await db.delete(briefs).where(and(eq(briefs.id, id), eq(briefs.workspaceId, workspaceId)));
-    } catch {
-      throw new Error('Pauta possui histórico de execuções — o post no WordPress não é afetado.');
-    }
+    // O histórico de execuções é preservado (runs.brief_id vira NULL); o post no WP não é afetado.
+    await db.delete(briefs).where(and(eq(briefs.id, id), eq(briefs.workspaceId, workspaceId)));
     revalidatePath('/briefs');
+    revalidatePath('/runs');
     return null;
   });
 }

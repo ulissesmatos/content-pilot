@@ -49,6 +49,10 @@ export interface PipelineInput {
   /** Idioma do conteúdo (prompts/datas). Cai no defaultLanguage do template. */
   language?: string;
   siteName?: string;
+  /** URL base do site — links internos ao próprio domínio nunca são removidos. */
+  siteBaseUrl?: string;
+  /** Categorias reais do site (nomes) para o LLM escolher, quando seo.chooseCategory. */
+  availableCategories?: string[];
   post: {
     id?: number;
     title: string;
@@ -70,6 +74,8 @@ interface EnvelopeParsed {
   newTitle: string;
   updatedHtml: string | null;
   changesSummary: string;
+  metaDescription: string;
+  category: string | null;
   data: Record<string, unknown>;
 }
 
@@ -82,6 +88,18 @@ const ECO = {
 
 function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Guardrail determinístico da categoria: só aceita um valor que exista de fato
+ * na lista de categorias reais do site (casamento case-insensitive). Impede o
+ * LLM de inventar uma categoria inexistente. null quando não bate ou não há lista.
+ */
+function resolveCategory(raw: unknown, available: string[]): string | null {
+  const chosen = String(raw ?? '').trim();
+  if (!chosen || available.length === 0) return null;
+  const match = available.find((c) => c.toLowerCase() === chosen.toLowerCase());
+  return match ?? null;
 }
 
 export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Promise<PipelineResult> {
@@ -114,6 +132,9 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     inputTokens: 0,
     outputTokens: 0,
     prePass: null,
+    metaDescription: null,
+    category: null,
+    externalLinks: null,
   };
 
   const finish = (patch: Partial<PipelineResult>): PipelineResult => {
@@ -285,6 +306,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     });
   }
 
+  const categoriesList = input.availableCategories?.filter(Boolean) ?? [];
   const promptVars = {
     today: todayLong(language, now),
     monthYear: monthYear(language, now),
@@ -295,6 +317,9 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     searchContext: promptContext || '(nenhum resultado)',
     siteName: input.siteName ?? '',
     extraInstructions: input.extraInstructions ?? '',
+    categories: categoriesList.length ? categoriesList.join(', ') : '(nenhuma categoria disponível)',
+    linkMin: cfg.externalLinks.min,
+    linkMax: cfg.externalLinks.max,
   };
   const prompt = interpolate(promptTemplate, promptVars);
 
@@ -371,6 +396,8 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     newTitle: typeof parsedRaw.newTitle === 'string' && parsedRaw.newTitle ? parsedRaw.newTitle : input.post.title,
     updatedHtml: typeof parsedRaw.updatedHtml === 'string' ? parsedRaw.updatedHtml : null,
     changesSummary: typeof parsedRaw.changesSummary === 'string' ? parsedRaw.changesSummary : 'Sem mudanças',
+    metaDescription: typeof parsedRaw.metaDescription === 'string' ? parsedRaw.metaDescription.trim() : '',
+    category: resolveCategory(parsedRaw.category, categoriesList),
     data:
       parsedRaw.data && typeof parsedRaw.data === 'object' ? (parsedRaw.data as Record<string, unknown>) : {},
   };
@@ -479,7 +506,8 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     }
   }
 
-  // 12. Validação determinística fail-safe (camada 3) — contra o mesmo contexto enviado ao LLM
+  // 12. Validação determinística fail-safe (camada 3) — contra o mesmo contexto enviado ao LLM.
+  //     Também sanitiza links externos alucinados contra as URLs das fontes.
   const validation = validateOutput(
     {
       hasChanges: true,
@@ -489,9 +517,17 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       data,
       searchContext: promptContext,
       resultsCount: context.resultsCount,
+      allowedUrls: context.sources.map((s) => s.url),
+      siteBaseUrl: input.siteBaseUrl,
+      // só sanitiza em geração de conteúdo novo (ver nota no tipo)
+      sanitizeLinks: cfg.externalLinks.enabled && input.mode === 'generate',
     },
     cfg,
   );
+  const externalLinks = cfg.externalLinks.enabled && input.mode === 'generate' ? validation.externalLinks : null;
+  if (externalLinks && externalLinks.stripped.length > 0) {
+    log(`links externos removidos (não constam nas fontes): ${externalLinks.stripped.length}`);
+  }
 
   if (!validation.ok) {
     return finish({
@@ -506,12 +542,15 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       validationErrors: validation.errors,
       verifyFailed,
       changesSummary: parsed.changesSummary,
+      metaDescription: parsed.metaDescription || null,
+      category: parsed.category,
+      externalLinks,
       prePass: prePassInfo,
     });
   }
 
-  // 13. Render + injeção do bloco gerenciado
-  let finalHtml = parsed.updatedHtml ?? '';
+  // 13. Render + injeção do bloco gerenciado (usa o HTML já sanitizado)
+  let finalHtml = validation.html;
   if (cfg.managedBlock.enabled && cfg.managedBlock.rendererId) {
     const renderer = managedBlockRenderers[cfg.managedBlock.rendererId];
     if (renderer) {
@@ -541,6 +580,9 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     rejected,
     dropped: validation.dropped,
     verifyFailed,
+    metaDescription: parsed.metaDescription || null,
+    category: parsed.category,
+    externalLinks,
     prePass: prePassInfo,
   });
 }

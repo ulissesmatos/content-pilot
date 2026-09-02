@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Play, Trash2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { deleteJobAction, runJobNowAction, toggleJobAction } from '@/actions/jobs';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ export function JobEnabledSwitch({ id, enabled }: { id: string; enabled: boolean
 }
 
 export function RunNowButton({ id }: { id: string }) {
+  const t = useTranslations('jobs');
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
@@ -45,7 +47,7 @@ export function RunNowButton({ id }: { id: string }) {
         startTransition(async () => {
           const result = await runJobNowAction({ id });
           if (result.ok) {
-            toast.success('Execução iniciada.');
+            toast.success(t('runStarted'));
             router.push(`/runs/${result.data.runId}`);
           } else {
             toast.error(result.error);
@@ -54,29 +56,30 @@ export function RunNowButton({ id }: { id: string }) {
       }
     >
       <Play className="size-4" />
-      {pending ? 'Iniciando...' : 'Executar agora'}
+      {pending ? t('starting') : t('runNow')}
     </Button>
   );
 }
 
 export function DeleteJobButton({ id, name }: { id: string; name: string }) {
+  const t = useTranslations('jobs');
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={`Excluir ${name}`}>
+        <Button variant="ghost" size="icon" aria-label={`${t('deleteTitle')}: ${name}`}>
           <Trash2 className="size-4" />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Excluir job</DialogTitle>
-          <DialogDescription>Excluir &quot;{name}&quot;? O histórico de execuções é mantido.</DialogDescription>
+          <DialogTitle>{t('deleteTitle')}</DialogTitle>
+          <DialogDescription>{t('deleteDescription', { name })}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-            Cancelar
+            {t('cancel')}
           </Button>
           <Button
             variant="destructive"
@@ -85,7 +88,7 @@ export function DeleteJobButton({ id, name }: { id: string; name: string }) {
               startTransition(async () => {
                 const result = await deleteJobAction({ id });
                 if (result.ok) {
-                  toast.success('Job excluído.');
+                  toast.success(t('deleted'));
                   setOpen(false);
                 } else {
                   toast.error(result.error);
@@ -93,7 +96,7 @@ export function DeleteJobButton({ id, name }: { id: string; name: string }) {
               })
             }
           >
-            {pending ? 'Excluindo...' : 'Excluir'}
+            {pending ? t('deleting') : t('deleteConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -44,16 +44,30 @@ Escreva um artigo NOVO sobre: "{{topic}}".
 RESULTADOS DA BUSCA WEB (conteúdo completo das páginas; base factual do artigo — não invente fatos):
 {{searchContext}}
 
+CATEGORIAS DISPONÍVEIS NO SITE (escolha exatamente UMA, copiando o nome como está):
+{{categories}}
+
 REGRAS:
 - Estruture com introdução direta, seções com headings h3 e conclusão curta.
 - Baseie afirmações factuais nas fontes acima; não invente números, datas ou citações.
 - Blocos Gutenberg obrigatórios: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
 - NÃO coloque o título dentro do updatedHtml; sem <script>/<style>; sem placeholders.
-- data: objeto vazio {}. noDataFound: false. action: "update". hasChanges: true.
-- newTitle: título SEO claro para o artigo.
-- changesSummary: resumo em 1 linha do artigo criado.
 
-FORMATO DA RESPOSTA: exclusivamente um objeto JSON válido, sem markdown.`;
+LINKS EXTERNOS (obrigatório):
+- Inclua de {{linkMin}} a {{linkMax}} links para fontes externas, distribuídos em pontos naturais do texto (ancore em palavras relevantes, não "clique aqui").
+- Use SOMENTE URLs que aparecem nas FONTES acima (copie a URL exatamente). NUNCA invente uma URL — links inventados são removidos automaticamente.
+- Marca Gutenberg: <a href="URL_DA_FONTE">texto âncora</a> dentro de um parágrafo.
+
+FORMATO DA RESPOSTA (obrigatório): exclusivamente um objeto JSON válido, sem markdown, com TODOS estes campos:
+- hasChanges: true
+- action: "update"
+- noDataFound: false
+- data: {}
+- newTitle: título SEO claro para o artigo (com mês/ano quando fizer sentido).
+- updatedHtml: O CORPO COMPLETO DO ARTIGO em HTML Gutenberg (introdução + seções h3 + conclusão + os links externos). Este é o conteúdo do post — NUNCA deixe vazio.
+- metaDescription: resumo do artigo em 120-160 caracteres, com a palavra-chave principal, atraente para clique (sem aspas, sem HTML).
+- category: uma das CATEGORIAS DISPONÍVEIS acima (nome idêntico). null se nenhuma servir.
+- changesSummary: resumo em 1 linha do artigo criado.`;
 
 export const genericArticleTemplate = {
   slug: 'generic-article',
@@ -89,6 +103,9 @@ export const genericArticleTemplate = {
       minSourcesForEmptyClaim: 3,
     },
     managedBlock: { enabled: false, markerPrefix: 'CP-BLOCK', rendererId: '', legacySignatures: [] },
+    seo: { metaDescription: true, chooseCategory: true },
+    externalLinks: { enabled: true, min: 2, max: 4 },
+    images: { enabled: true, candidates: 8, inlineMax: 3, webSearch: true },
     validation: { titleMin: 10, titleMax: 120, htmlMinChars: 200 },
     llmDefaults: { generateMaxTokens: 16_000, generateTemperature: 0.2, verifyMaxTokens: 8_000, verifyTemperature: 0 },
   } satisfies TemplateConfig,

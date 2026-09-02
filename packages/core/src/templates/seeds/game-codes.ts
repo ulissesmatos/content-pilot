@@ -52,6 +52,7 @@ COBERTURA MÁXIMA DE CÓDIGOS (obrigatório):
 REGRAS DOS CÓDIGOS (campos data.activeCodes/data.expiredCodes) — OBRIGATÓRIAS:
 - Copie cada código EXATAMENTE como aparece nas fontes da busca web (caractere por caractere). NUNCA invente, adapte ou complete códigos.
 - Cada código deve ter o campo "source" preenchido com a URL da fonte onde ele aparece.
+- Preencha o campo "reward" com uma descrição curta (3-6 palavras) do que o código dá, EXATAMENTE como a fonte descreve (ex.: "500 Gemas", "Pet exclusivo", "Boost de XP 2x", "Skin grátis"). Use null SOMENTE se nenhuma fonte disser o que o código concede — nunca invente uma recompensa.
 - Aceite SOMENTE códigos de resgate do jogo "{{topic}}". Cupons de loja, códigos de desconto de e-commerce, promoções e códigos de outros jogos são PROIBIDOS.
 - Se as fontes não confirmarem claramente que um código expirou, mantenha-o em activeCodes com isNew: false. Só mova para expiredCodes se a fonte disser explicitamente que não funciona mais. Data antiga, mês anterior ou ausência de menção ao mês atual NÃO significam expiração.
 - Se as fontes não trouxerem NENHUM código válido para este jogo, defina noDataFound: true e deixe as listas vazias — mesmo assim produza o updatedHtml normal (introdução + como resgatar + onde encontrar novos códigos).
@@ -120,6 +121,7 @@ ESTRUTURA DO ARTIGO (updatedHtml):
 
 Siga TODAS as regras de códigos, HTML Gutenberg e SEO abaixo:
 - Códigos SOMENTE nos campos data.activeCodes/data.expiredCodes, copiados verbatim das fontes com "source" preenchido; NUNCA no HTML.
+- Preencha "reward" com uma descrição curta (3-6 palavras) do que cada código dá, conforme a fonte (ex.: "500 Gemas", "Pet exclusivo"). Use null só se a fonte não disser a recompensa.
 - Sem <script>/<style>, sem placeholders, sem o título dentro do HTML.
 - Blocos Gutenberg: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
 - Se não houver códigos válidos nas fontes, noDataFound: true e listas vazias.
@@ -168,6 +170,7 @@ MAXIMUM CODE COVERAGE (mandatory):
 CODE RULES (data.activeCodes/data.expiredCodes fields) — MANDATORY:
 - Copy each code EXACTLY as it appears in the web sources (character by character). NEVER invent, adapt or complete codes.
 - Every code must have "source" filled with the URL where it appears.
+- Fill "reward" with a short description (3-6 words) of what the code grants, EXACTLY as the source describes it (e.g. "500 Gems", "Exclusive Pet", "2x XP Boost", "Free Skin"). Use null ONLY if no source states the reward — never invent one.
 - Accept ONLY in-game redeem codes for "{{topic}}". Store coupons, e-commerce discount codes, promotions and codes for other games are FORBIDDEN.
 - If sources do not clearly confirm a code expired, keep it in activeCodes with isNew: false. Only move to expiredCodes when a source explicitly says it no longer works.
 - If sources bring NO valid code for this game, set noDataFound: true and leave the lists empty — still produce the normal updatedHtml.
@@ -231,6 +234,7 @@ ARTICLE STRUCTURE (updatedHtml):
 
 Follow ALL the code, Gutenberg HTML and SEO rules:
 - Codes ONLY in data.activeCodes/data.expiredCodes, copied verbatim from sources with "source" filled; NEVER in the HTML.
+- Fill "reward" with a short description (3-6 words) of what each code grants, per the source (e.g. "500 Gems", "Exclusive Pet"). Use null only if the source doesn't state the reward.
 - No <script>/<style>, no placeholders, no title inside the HTML.
 - Gutenberg blocks: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
 - If there are no valid codes in the sources, noDataFound: true and empty lists.
@@ -299,7 +303,11 @@ export const gameCodesTemplate = {
               type: 'object',
               properties: {
                 code: { type: 'string' },
-                reward: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+                reward: {
+                  anyOf: [{ type: 'string' }, { type: 'null' }],
+                  description:
+                    'O que o código concede, em poucas palavras e exatamente como a fonte descreve (ex.: "500 Gemas", "Pet exclusivo"). null somente se nenhuma fonte disser a recompensa.',
+                },
                 isNew: { type: 'boolean' },
                 source: { type: 'string' },
               },
@@ -313,7 +321,11 @@ export const gameCodesTemplate = {
               type: 'object',
               properties: {
                 code: { type: 'string' },
-                reward: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+                reward: {
+                  anyOf: [{ type: 'string' }, { type: 'null' }],
+                  description:
+                    'O que o código concedia, em poucas palavras e exatamente como a fonte descreve. null somente se nenhuma fonte disser a recompensa.',
+                },
                 source: { type: 'string' },
               },
               required: ['code', 'reward', 'source'],
@@ -337,6 +349,11 @@ export const gameCodesTemplate = {
       rendererId: 'game-codes-widget',
       legacySignatures: ['dg-codes-widget'],
     },
+    // O fluxo de códigos é especializado (intro + como resgatar + onde achar);
+    // SEO estruturado, links externos e imagens ficam desligados para não alterá-lo.
+    seo: { metaDescription: false, chooseCategory: false },
+    externalLinks: { enabled: false, min: 2, max: 4 },
+    images: { enabled: false, candidates: 5, inlineMax: 0, webSearch: true },
     validation: { titleMin: 10, titleMax: 120, htmlMinChars: 200 },
     llmDefaults: { generateMaxTokens: 16_000, generateTemperature: 0.2, verifyMaxTokens: 8_000, verifyTemperature: 0 },
   } satisfies TemplateConfig,

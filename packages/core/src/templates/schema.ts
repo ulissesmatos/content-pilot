@@ -64,6 +64,43 @@ export const templateConfigSchema = z.object({
     rendererId: z.string().default(''),
     legacySignatures: z.array(z.string()).default([]),
   }),
+  /** SEO estruturado (Fase 2): meta description e escolha de categoria pelo LLM. */
+  seo: z
+    .object({
+      /** Pede uma meta description ao LLM (vira excerpt no WP). */
+      metaDescription: z.boolean().default(false),
+      /** Pede ao LLM que escolha a categoria entre as reais do site. */
+      chooseCategory: z.boolean().default(false),
+    })
+    .default({ metaDescription: false, chooseCategory: false }),
+  /**
+   * Links externos (Fase 2): o prompt pede N links para fontes reais; a
+   * validação determinística remove qualquer link cujo href não conste nas
+   * fontes da busca (anti-alucinação, igual aos códigos).
+   */
+  externalLinks: z
+    .object({
+      enabled: z.boolean().default(false),
+      min: z.number().int().default(2),
+      max: z.number().int().default(4),
+    })
+    .default({ enabled: false, min: 2, max: 4 }),
+  /**
+   * Imagens (Fase 3): busca imagens (web + acervo aberto), um LLM com visão
+   * escolhe a capa e as imagens do corpo (ou nenhuma). A capa vira imagem
+   * destacada; as do corpo são injetadas entre os parágrafos.
+   */
+  images: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** Quantas candidatas mostrar ao modelo de visão. */
+      candidates: z.number().int().min(1).max(10).default(5),
+      /** Máximo de imagens no corpo do texto (0 = só capa). O total real escala com o tamanho do artigo. */
+      inlineMax: z.number().int().min(0).max(6).default(3),
+      /** Busca imagens na web (Tavily) além do acervo aberto (Openverse) — muito mais relevantes; licença não verificada. */
+      webSearch: z.boolean().default(true),
+    })
+    .default({ enabled: false, candidates: 5, inlineMax: 3, webSearch: true }),
   validation: z
     .object({
       titleMin: z.number().int().default(10),
@@ -109,9 +146,29 @@ export function buildUpdateResponseSchema(dataSchema: Record<string, unknown>): 
       newTitle: { type: 'string' },
       updatedHtml: { type: 'string' },
       changesSummary: { type: 'string' },
+      // SEO (Fase 2): sempre presentes no envelope (strict mode). Ficam vazio/null
+      // quando o template não pede — o prompt é quem instrui a preenchê-los.
+      metaDescription: {
+        type: 'string',
+        description: 'Meta description SEO (120-160 caracteres). "" se o template não pedir.',
+      },
+      category: {
+        anyOf: [{ type: 'string' }, { type: 'null' }],
+        description: 'Categoria escolhida entre as disponíveis. null se o template não pedir.',
+      },
       data: dataSchema,
     },
-    required: ['hasChanges', 'action', 'noDataFound', 'newTitle', 'updatedHtml', 'changesSummary', 'data'],
+    required: [
+      'hasChanges',
+      'action',
+      'noDataFound',
+      'newTitle',
+      'updatedHtml',
+      'changesSummary',
+      'metaDescription',
+      'category',
+      'data',
+    ],
     additionalProperties: false,
   };
 }

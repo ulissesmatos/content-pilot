@@ -1,16 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { CronExpressionParser } from 'cron-parser';
 import { and, contentJobs, eq, getDb, runs, sites } from '@content-pilot/db';
-import { jobLimitsSchema, jobLlmConfigSchema, postFilterSchema } from '@content-pilot/core';
+import { jobLimitsSchema, jobLlmConfigSchema, nextRunAt as computeNextRunAt, postFilterSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
 import { getBoss } from '@/lib/boss';
-
-function computeNextRunAt(cron: string, timezone: string): Date {
-  return CronExpressionParser.parse(cron, { tz: timezone }).next().toDate();
-}
+import { assertTemplateAccessible } from '@/lib/tenant';
 
 const createJobSchema = z.object({
   name: z.string().min(2).max(80),
@@ -46,6 +42,7 @@ export async function createJobAction(input: unknown): Promise<ActionResult<{ id
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
     if (!site) throw new Error('Site não encontrado.');
+    await assertTemplateAccessible(data.templateId, workspaceId);
 
     let nextRunAt: Date;
     try {
@@ -90,6 +87,67 @@ export async function createJobAction(input: unknown): Promise<ActionResult<{ id
 
 const idSchema = z.object({ id: z.string().uuid() });
 const toggleSchema = z.object({ id: z.string().uuid(), enabled: z.boolean() });
+const updateJobSchema = createJobSchema.extend({ id: z.string().uuid() });
+
+/** Edita um job existente (nome, filtro, cron, modo, LLM). Recalcula o próximo disparo se ativo. */
+export async function updateJobAction(input: unknown): Promise<ActionResult<{ id: string }>> {
+  return runAuthedAction(updateJobSchema, input, async (data, { workspaceId }) => {
+    const db = getDb();
+    const [job] = await db
+      .select()
+      .from(contentJobs)
+      .where(and(eq(contentJobs.id, data.id), eq(contentJobs.workspaceId, workspaceId)))
+      .limit(1);
+    if (!job) throw new Error('Job não encontrado.');
+
+    const [site] = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
+      .limit(1);
+    if (!site) throw new Error('Site não encontrado.');
+    await assertTemplateAccessible(data.templateId, workspaceId);
+
+    let nextRunAt: Date;
+    try {
+      nextRunAt = computeNextRunAt(data.scheduleCron, data.timezone);
+    } catch {
+      throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
+    }
+
+    const llmTask = { provider: data.provider, model: data.model };
+    await db
+      .update(contentJobs)
+      .set({
+        siteId: data.siteId,
+        templateId: data.templateId,
+        name: data.name.trim(),
+        postFilter: postFilterSchema.parse({
+          tags: parseIdList(data.tags),
+          categories: parseIdList(data.categories),
+          perPage: data.maxPostsPerRun,
+        }),
+        scheduleCron: data.scheduleCron,
+        timezone: data.timezone,
+        language: data.language || null,
+        llmConfig: jobLlmConfigSchema.parse({ generate: llmTask, verify: llmTask }),
+        limits: jobLimitsSchema.parse({
+          maxPostsPerRun: data.maxPostsPerRun,
+          tokenBudgetPerRun: data.tokenBudgetPerRun,
+          skipIfSourcesUnchanged: data.skipIfSourcesUnchanged,
+          mode: data.mode,
+          searchDepth: data.searchDepth,
+        }),
+        // recalcula o próximo disparo só se o job está ativo (mesmo padrão do autopilot)
+        nextRunAt: job.enabled ? nextRunAt : job.nextRunAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(contentJobs.id, data.id));
+
+    revalidatePath('/jobs');
+    return { id: data.id };
+  });
+}
 
 export async function toggleJobAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(toggleSchema, input, async ({ id, enabled }, { workspaceId }) => {
@@ -118,12 +176,18 @@ export async function toggleJobAction(input: unknown): Promise<ActionResult> {
 export async function deleteJobAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
     const db = getDb();
-    try {
-      await db.delete(contentJobs).where(and(eq(contentJobs.id, id), eq(contentJobs.workspaceId, workspaceId)));
-    } catch {
-      throw new Error('Job possui histórico de execuções — desative-o em vez de excluir.');
-    }
+    // Não excluir com execução em andamento — o worker precisaria de um job que não existe mais.
+    const [running] = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(eq(runs.jobId, id), eq(runs.workspaceId, workspaceId), eq(runs.status, 'running')))
+      .limit(1);
+    if (running) throw new Error('Este job tem uma execução em andamento — pare a execução antes de excluir.');
+
+    // Histórico preservado (runs.job_id vira NULL); estado de fontes do job cai junto (cascade).
+    await db.delete(contentJobs).where(and(eq(contentJobs.id, id), eq(contentJobs.workspaceId, workspaceId)));
     revalidatePath('/jobs');
+    revalidatePath('/runs');
     return null;
   });
 }
@@ -140,7 +204,7 @@ export async function runJobNowAction(input: unknown): Promise<ActionResult<{ ru
 
     const [run] = await db
       .insert(runs)
-      .values({ workspaceId, jobId: id, trigger: 'manual', status: 'running' })
+      .values({ workspaceId, jobId: id, kind: 'update', trigger: 'manual', status: 'running' })
       .returning({ id: runs.id });
 
     const boss = await getBoss();

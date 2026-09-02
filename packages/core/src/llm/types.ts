@@ -22,6 +22,8 @@ export interface LlmCompleteRequest {
   schemaName: string;
   maxTokens: number;
   temperature: number;
+  /** URLs de imagens para análise multimodal (visão) — Fase 3. */
+  images?: string[];
 }
 
 export interface LlmCompleteResult {

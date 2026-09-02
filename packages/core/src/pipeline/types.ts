@@ -11,7 +11,7 @@ export class BudgetExceededError extends Error {
 }
 
 export interface LlmCallRecord {
-  purpose: 'generate' | 'verify';
+  purpose: 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate';
   provider: string;
   model: string;
   inputTokens: number;
@@ -56,6 +56,13 @@ export interface PrePassInfo {
   newCandidates: string[];
 }
 
+export interface ExternalLinksInfo {
+  /** Links externos válidos mantidos no HTML final. */
+  kept: number;
+  /** Hrefs removidos por não constarem nas fontes (possível alucinação). */
+  stripped: string[];
+}
+
 export interface PipelineResult {
   status: PipelineStatus;
   hasChanges: boolean;
@@ -80,4 +87,10 @@ export interface PipelineResult {
   outputTokens: number;
   /** Diagnóstico da pré-checagem determinística (modo econômico). */
   prePass: PrePassInfo | null;
+  /** Meta description SEO (Fase 2) — vira excerpt no WP quando o template pede. */
+  metaDescription: string | null;
+  /** Categoria escolhida pelo LLM entre as reais do site (Fase 2). */
+  category: string | null;
+  /** Diagnóstico dos links externos após a sanitização anti-alucinação. */
+  externalLinks: ExternalLinksInfo | null;
 }

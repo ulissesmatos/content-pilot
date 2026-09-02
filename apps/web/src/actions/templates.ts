@@ -4,13 +4,19 @@ import { revalidatePath } from 'next/cache';
 import { and, contentJobs, contentTemplates, eq, getDb, isNull, or } from '@content-pilot/db';
 import { parseTemplateConfig } from '@content-pilot/core';
 import { z } from 'zod';
-import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { isFkViolation, runAuthedAction, type ActionResult } from '@/lib/action-utils';
 
 const idSchema = z.object({ id: z.string().uuid() });
 
+const cloneTemplateSchema = z.object({
+  id: z.string().uuid(),
+  /** Nome customizado (ex.: criação rápida a partir do modal de job). Default: "<origem> (cópia)". */
+  name: z.string().min(2, 'Nome muito curto').max(80).optional(),
+});
+
 /** Clona um template (builtin ou próprio) para o workspace, liberando edição. */
-export async function cloneTemplateAction(input: unknown): Promise<ActionResult<{ id: string }>> {
-  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
+export async function cloneTemplateAction(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
+  return runAuthedAction(cloneTemplateSchema, input, async ({ id, name }, { workspaceId }) => {
     const db = getDb();
     const [source] = await db
       .select()
@@ -34,12 +40,14 @@ export async function cloneTemplateAction(input: unknown): Promise<ActionResult<
     let slug = baseSlug;
     for (let i = 2; taken.has(slug); i++) slug = `${baseSlug}-${i}`;
 
+    const finalName = name?.trim() || `${source.name} (cópia)`;
+
     const [clone] = await db
       .insert(contentTemplates)
       .values({
         workspaceId,
         slug,
-        name: `${source.name} (cópia)`,
+        name: finalName,
         description: source.description,
         config: source.config,
         isBuiltin: false,
@@ -47,7 +55,7 @@ export async function cloneTemplateAction(input: unknown): Promise<ActionResult<
       .returning({ id: contentTemplates.id });
 
     revalidatePath('/templates');
-    return { id: clone!.id };
+    return { id: clone!.id, name: finalName };
   });
 }
 
@@ -114,16 +122,24 @@ export async function deleteTemplateAction(input: unknown): Promise<ActionResult
       throw new Error(`Template em uso pelo job "${jobUsing.name}" — troque o template do job antes de excluir.`);
     }
 
-    const [deleted] = await db
-      .delete(contentTemplates)
-      .where(
-        and(
-          eq(contentTemplates.id, id),
-          eq(contentTemplates.workspaceId, workspaceId),
-          eq(contentTemplates.isBuiltin, false),
-        ),
-      )
-      .returning({ id: contentTemplates.id });
+    let deleted;
+    try {
+      [deleted] = await db
+        .delete(contentTemplates)
+        .where(
+          and(
+            eq(contentTemplates.id, id),
+            eq(contentTemplates.workspaceId, workspaceId),
+            eq(contentTemplates.isBuiltin, false),
+          ),
+        )
+        .returning({ id: contentTemplates.id });
+    } catch (err) {
+      if (isFkViolation(err)) {
+        throw new Error('Template em uso por pautas ou autopilots — troque o template deles antes de excluir.');
+      }
+      throw err;
+    }
     if (!deleted) throw new Error('Template não encontrado ou é builtin (somente leitura).');
 
     revalidatePath('/templates');

@@ -1,3 +1,4 @@
+import { sanitizeExternalLinks } from '../html/external-links';
 import type { TemplateConfig } from '../templates/schema';
 
 /**
@@ -14,6 +15,16 @@ export interface ValidateOutputInput {
   data: Record<string, unknown>;
   searchContext: string;
   resultsCount: number;
+  /** URLs das fontes da busca — base para a checagem anti-alucinação de links. */
+  allowedUrls?: string[];
+  /** Domínio do próprio site (links internos são sempre permitidos). */
+  siteBaseUrl?: string;
+  /**
+   * Sanitizar links externos alucinados. Só faz sentido em geração de conteúdo
+   * novo — em update, links pré-existentes do post não estão nas fontes de hoje
+   * e não podem ser removidos.
+   */
+  sanitizeLinks?: boolean;
 }
 
 export interface DroppedItem {
@@ -28,12 +39,25 @@ export interface ValidateOutputResult {
   /** data com itens reprovados na checagem verbatim removidos. */
   data: Record<string, unknown>;
   dropped: DroppedItem[];
+  /** HTML final (com links externos alucinados removidos, quando aplicável). */
+  html: string;
+  /** Diagnóstico dos links externos: mantidos + hrefs removidos. */
+  externalLinks: { kept: number; stripped: string[] };
 }
 
 export function validateOutput(input: ValidateOutputInput, cfg: TemplateConfig): ValidateOutputResult {
   const errs: string[] = [];
-  const html = input.updatedHtml ?? '';
   const extraction = cfg.extraction;
+
+  // Sanitização anti-alucinação de links externos (antes das demais checagens,
+  // para que tudo valide o HTML que de fato será publicado).
+  let html = input.updatedHtml ?? '';
+  let externalLinks = { kept: 0, stripped: [] as string[] };
+  if (input.sanitizeLinks) {
+    const san = sanitizeExternalLinks(html, input.allowedUrls ?? [], { siteBaseUrl: input.siteBaseUrl });
+    html = san.html;
+    externalLinks = { kept: san.kept, stripped: san.stripped };
+  }
 
   // Sem fontes não dá para atualizar nem afirmar "sem dados"
   // (protege contra falha transitória da busca virar aviso errado no site)
@@ -120,5 +144,5 @@ export function validateOutput(input: ValidateOutputInput, cfg: TemplateConfig):
     }
   }
 
-  return { ok: errs.length === 0, errors: errs, data, dropped };
+  return { ok: errs.length === 0, errors: errs, data, dropped, html, externalLinks };
 }

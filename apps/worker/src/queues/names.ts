@@ -3,6 +3,7 @@ export const QUEUE = {
   jobRun: 'job.run',
   postProcess: 'post.process',
   briefGenerate: 'brief.generate',
+  autopilotDiscover: 'autopilot.discover',
 } as const;
 
 export interface JobRunPayload {
@@ -18,5 +19,10 @@ export interface PostProcessPayload {
 
 export interface BriefGeneratePayload {
   briefId: string;
+  runId: string;
+}
+
+export interface AutopilotDiscoverPayload {
+  autopilotConfigId: string;
   runId: string;
 }

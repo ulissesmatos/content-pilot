@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { and, count, desc, eq, gte, isNotNull, sql } from 'drizzle-orm';
 import { AlertTriangle, CircleDollarSign, Globe, History, RefreshCw } from 'lucide-react';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { contentJobs, getDb, llmCalls, runs, sites } from '@content-pilot/db';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
@@ -9,8 +10,6 @@ import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { requireSession } from '@/lib/auth';
-
-const dateFmt = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 /** Worker saudável = scheduler.tick concluído nos últimos 3 minutos. */
 async function isWorkerAlive(): Promise<boolean | null> {
@@ -29,6 +28,9 @@ async function isWorkerAlive(): Promise<boolean | null> {
 export default async function OverviewPage() {
   const { workspaceId } = await requireSession();
   const db = getDb();
+  const [t, locale] = await Promise.all([getTranslations('overview'), getLocale()]);
+  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const monthStart = new Date();
@@ -67,60 +69,54 @@ export default async function OverviewPage() {
 
   return (
     <>
-      <PageHeader
-        title="Visão geral"
-        description="Acompanhe sites conectados, execuções e custos de IA."
-      />
+      <PageHeader title={t('title')} description={t('description')} />
 
       {workerAlive === false || workerAlive === null ? (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <div>
-            <p className="font-medium">Worker inativo</p>
+            <p className="font-medium">{t('workerDownTitle')}</p>
             <p>
-              Jobs agendados e pautas não serão processados. Em desenvolvimento, rode{' '}
-              <code className="rounded bg-amber-500/15 px-1 font-mono text-xs">pnpm dev:worker</code>; em produção,
-              verifique o serviço <code className="rounded bg-amber-500/15 px-1 font-mono text-xs">worker</code> no
-              Docker.
+              {t.rich('workerDownBody', {
+                code: (chunks) => (
+                  <code className="rounded bg-amber-500/15 px-1 font-mono text-xs">{chunks}</code>
+                ),
+              })}
             </p>
           </div>
         </div>
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Sites conectados" value={String(siteCount?.value ?? 0)} icon={Globe} />
-        <StatCard title="Execuções (7 dias)" value={String(runCount?.value ?? 0)} icon={History} />
+        <StatCard title={t('statSites')} value={String(siteCount?.value ?? 0)} icon={Globe} />
+        <StatCard title={t('statRuns7d')} value={String(runCount?.value ?? 0)} icon={History} />
         <StatCard
-          title="Custo de IA no mês"
-          value={`US$ ${monthCost.toFixed(2)}`}
-          hint={monthTokens > 0 ? `${(monthTokens / 1000).toFixed(0)}k tokens` : 'nenhuma chamada ainda'}
+          title={t('statMonthCost')}
+          value={money.format(monthCost)}
+          hint={monthTokens > 0 ? t('tokensHint', { count: (monthTokens / 1000).toFixed(0) }) : t('noCallsYet')}
           icon={CircleDollarSign}
         />
         <StatCard
-          title="Próxima execução"
+          title={t('statNextRun')}
           value={nextJob?.next ? dateFmt.format(new Date(nextJob.next)) : '—'}
-          hint={nextJob?.next ? undefined : 'nenhum job agendado'}
+          hint={nextJob?.next ? undefined : t('noJobScheduled')}
           icon={RefreshCw}
         />
       </div>
 
       {recentRuns.length === 0 ? (
-        <EmptyState
-          icon={History}
-          title="Nenhuma execução ainda"
-          description="Conecte um site WordPress e crie um job de atualização para ver as execuções aqui."
-        />
+        <EmptyState icon={History} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (
         <Card className="py-0">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Início</TableHead>
-                  <TableHead>Origem</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Itens</TableHead>
-                  <TableHead>Custo</TableHead>
+                  <TableHead>{t('colStart')}</TableHead>
+                  <TableHead>{t('colSource')}</TableHead>
+                  <TableHead>{t('colStatus')}</TableHead>
+                  <TableHead>{t('colItems')}</TableHead>
+                  <TableHead>{t('colCost')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -133,7 +129,7 @@ export default async function OverviewPage() {
                           {dateFmt.format(run.startedAt)}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">{jobName ?? 'pauta'}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{jobName ?? t('sourceBrief')}</TableCell>
                       <TableCell>
                         <StatusBadge status={run.status} />
                       </TableCell>
@@ -141,7 +137,7 @@ export default async function OverviewPage() {
                         {run.expectedItems ?? '—'}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm tabular-nums">
-                        {stats.costEstimateUsd ? `US$ ${Number(stats.costEstimateUsd).toFixed(4)}` : '—'}
+                        {stats.costEstimateUsd ? money.format(Number(stats.costEstimateUsd)) : '—'}
                       </TableCell>
                     </TableRow>
                   );

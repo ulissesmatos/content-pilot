@@ -4,9 +4,12 @@ import type {
   CmsConnectionResult,
   CmsCreatePostInput,
   CmsListPostsFilter,
+  CmsMedia,
+  CmsMediaUpload,
   CmsPost,
   CmsTerm,
   CmsUpdatePostInput,
+  PostSummary,
 } from './types';
 
 export interface WordPressCredentials {
@@ -134,11 +137,72 @@ export class WordPressAdapter implements CmsAdapter {
   }
 
   async createPost(input: CmsCreatePostInput): Promise<CmsPost> {
+    // mapeia featuredMediaId → featured_media (nome do campo no WP REST)
+    const { featuredMediaId, ...rest } = input;
+    const body: Record<string, unknown> = { ...rest };
+    if (featuredMediaId) body.featured_media = featuredMediaId;
     const post = await this.request<WpPostResponse>('/posts', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
     });
     return this.toCmsPost(post);
+  }
+
+  /**
+   * Faz upload de uma imagem para a biblioteca de mídia (POST binário com
+   * Content-Disposition) e define alt/legenda. Retorna o ID e a URL pública —
+   * o ID vira a imagem destacada do post.
+   */
+  async uploadMedia(input: CmsMediaUpload): Promise<CmsMedia> {
+    const res = await fetchWithRetry(
+      `${this.baseUrl}/wp-json/wp/v2/media`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: this.authHeader,
+          'Content-Disposition': `attachment; filename="${input.filename.replace(/"/g, '')}"`,
+          'Content-Type': input.mimeType,
+          Accept: 'application/json',
+        },
+        // Uint8Array é body válido no fetch do Node
+        body: input.data as unknown as RequestInit['body'],
+      },
+      { timeoutMs: 60_000, retries: 2, retryDelayMs: 3_000, ...this.fetchOpts },
+    );
+    const media = (await res.json()) as { id: number; source_url: string };
+    if (input.alt || input.caption) {
+      await this.request(`/media/${media.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ alt_text: input.alt ?? '', caption: input.caption ?? '' }),
+      });
+    }
+    return { id: media.id, sourceUrl: media.source_url };
+  }
+
+  /**
+   * Títulos recentes (published) — leve, sem content.raw. Usado no dedup do
+   * Autopilot para o LLM saber o que já existe sem baixar HTML pesado.
+   */
+  async listRecentPostTitles(limit = 120): Promise<PostSummary[]> {
+    const perPage = Math.min(100, Math.max(1, limit));
+    const pages = Math.ceil(limit / perPage);
+    const out: PostSummary[] = [];
+    for (let page = 1; page <= pages && out.length < limit; page++) {
+      const params = new URLSearchParams({
+        per_page: String(perPage),
+        page: String(page),
+        status: 'publish,draft,future',
+        orderby: 'date',
+        order: 'desc',
+        _fields: 'id,title,slug,link',
+      });
+      const posts = await this.request<WpPostResponse[]>(`/posts?${params}`);
+      for (const p of posts) {
+        out.push({ id: p.id, title: p.title?.rendered ?? p.title?.raw ?? '', slug: p.slug, link: p.link });
+      }
+      if (posts.length < perPage) break;
+    }
+    return out.slice(0, limit);
   }
 
   async listCategories(): Promise<CmsTerm[]> {

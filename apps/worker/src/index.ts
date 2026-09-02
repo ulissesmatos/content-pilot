@@ -2,11 +2,18 @@ import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { PgBoss } from 'pg-boss';
 import { createDb } from '@content-pilot/db';
-import { QUEUE, type BriefGeneratePayload, type JobRunPayload, type PostProcessPayload } from './queues/names';
+import {
+  QUEUE,
+  type AutopilotDiscoverPayload,
+  type BriefGeneratePayload,
+  type JobRunPayload,
+  type PostProcessPayload,
+} from './queues/names';
 import { handleSchedulerTick } from './queues/scheduler-tick';
 import { handleJobRun } from './queues/job-run';
 import { handlePostProcess } from './queues/post-process';
 import { handleBriefGenerate } from './queues/brief-generate';
+import { handleAutopilotDiscover } from './queues/autopilot-discover';
 
 config({ path: resolve(process.cwd(), '../../.env') });
 
@@ -48,6 +55,10 @@ async function main() {
 
   await boss.work(QUEUE.briefGenerate, async (jobs: Array<{ data: BriefGeneratePayload }>) => {
     for (const job of jobs) await handleBriefGenerate(db, job.data);
+  });
+
+  await boss.work(QUEUE.autopilotDiscover, async (jobs: Array<{ data: AutopilotDiscoverPayload }>) => {
+    for (const job of jobs) await handleAutopilotDiscover(db, boss, job.data);
   });
 
   console.log(`[worker] pronto — filas registradas (concorrência post.process: ${concurrency})`);

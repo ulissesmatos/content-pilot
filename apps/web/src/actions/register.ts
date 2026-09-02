@@ -5,6 +5,8 @@ import { eq } from 'drizzle-orm';
 import { getDb, subscriptions, users, workspaces } from '@content-pilot/db';
 import { z } from 'zod';
 import { signIn } from '@/lib/auth';
+import { clientIp } from '@/lib/request-context';
+import { consumeRateLimit } from '@/lib/rate-limit';
 import type { ActionResult } from '@/lib/action-utils';
 
 const registerSchema = z.object({
@@ -33,6 +35,13 @@ export async function registerAction(input: unknown): Promise<ActionResult<{ ok:
   }
   const data = parsed.data;
   const email = data.email.toLowerCase().trim();
+
+  // Endpoint público: sem isto, criar contas em massa é só um loop. Conta
+  // depois da validação para não punir quem só errou o preenchimento.
+  const ip = await clientIp().catch(() => null);
+  if (ip && !consumeRateLimit('register:ip', ip)) {
+    return { ok: false, error: 'Muitas contas criadas a partir daqui. Tente novamente mais tarde.' };
+  }
 
   const db = getDb();
   const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);

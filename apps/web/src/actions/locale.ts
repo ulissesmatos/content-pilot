@@ -8,10 +8,14 @@ import { isLocale, LOCALE_COOKIE } from '@/i18n/config';
 export async function setLocaleAction(locale: string): Promise<void> {
   if (!isLocale(locale)) return;
   const store = await cookies();
+  // httpOnly: só o servidor lê este cookie (i18n/request.ts); nenhum script
+  // do client precisa dele, então não há motivo para expô-lo ao DOM.
   store.set(LOCALE_COOKIE, locale, {
     path: '/',
     maxAge: 60 * 60 * 24 * 365,
     sameSite: 'lax',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
   });
   revalidatePath('/', 'layout');
 }

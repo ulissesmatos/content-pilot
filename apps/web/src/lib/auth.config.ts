@@ -20,6 +20,15 @@ export const authConfig = {
         if (isLoggedIn) return Response.redirect(new URL('/', nextUrl));
         return true;
       }
+      if (nextUrl.pathname.startsWith('/admin')) {
+        if (!isLoggedIn) return false;
+        // Gate apenas de UX: o JWT não revalida, então o cargo aqui pode estar
+        // velho (rebaixado depois do login). A autorização real é o
+        // requireAdmin() no layout de /admin e dentro de cada admin action.
+        const role = (auth?.user as { role?: string } | undefined)?.role;
+        if (role !== 'admin') return Response.redirect(new URL('/', nextUrl));
+        return true;
+      }
       return isLoggedIn;
     },
     jwt({ token, user }) {

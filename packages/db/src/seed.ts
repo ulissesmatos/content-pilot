@@ -15,7 +15,9 @@ config({ path: resolve(import.meta.dirname, '../../../.env') });
 async function main() {
   const db = createDb();
 
-  const adminEmail = process.env.ADMIN_EMAIL;
+  // normalizado: o login sempre compara em minúsculas, então um ADMIN_EMAIL
+  // com maiúscula criaria uma conta na qual ninguém consegue entrar.
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (!adminEmail || !adminPassword || adminPassword === 'troque-me') {
     throw new Error('Defina ADMIN_EMAIL e ADMIN_PASSWORD no .env antes de rodar o seed.');
@@ -28,6 +30,7 @@ async function main() {
   }
 
   const [existingUser] = await db.select().from(users).where(eq(users.email, adminEmail)).limit(1);
+  let adminWorkspaceId: string;
   if (!existingUser) {
     const passwordHash = await hash(adminPassword, 12);
     await db.insert(users).values({
@@ -35,16 +38,33 @@ async function main() {
       email: adminEmail,
       passwordHash,
       name: 'Admin',
-      role: 'admin', // admin da plataforma: sem limites de plano, gerencia credenciais globais
+      role: 'admin', // operador da plataforma: gerencia credenciais globais
     });
+    adminWorkspaceId = workspace!.id;
     console.log(`Usuário admin criado: ${adminEmail}`);
-  } else if (existingUser.role !== 'admin') {
-    // instalações antigas: promove o usuário do seed a admin da plataforma
-    await db.update(users).set({ role: 'admin' }).where(eq(users.id, existingUser.id));
-    console.log(`Usuário ${adminEmail} promovido a admin da plataforma.`);
   } else {
-    console.log(`Usuário admin já existe: ${adminEmail}`);
+    adminWorkspaceId = existingUser.workspaceId;
+    // O seed é o caminho de recuperação do super admin: repõe cargo e destrava
+    // a conta caso status/exclusão tenham sido mexidos à mão no banco.
+    const needsFix =
+      existingUser.role !== 'admin' || existingUser.status !== 'active' || existingUser.deletedAt !== null;
+    if (needsFix) {
+      await db
+        .update(users)
+        .set({ role: 'admin', status: 'active', deletedAt: null, deletedBy: null, updatedAt: new Date() })
+        .where(eq(users.id, existingUser.id));
+      console.log(`Super admin ${adminEmail} restaurado (cargo/status).`);
+    } else {
+      console.log(`Usuário admin já existe: ${adminEmail}`);
+    }
   }
+
+  // Isenção de cobrança do workspace do super admin. É explícita e não
+  // derivada de cargo — admin comum NÃO ganha isenção por ser admin.
+  await db
+    .update(workspaces)
+    .set({ billingBypass: true, status: 'active', updatedAt: new Date() })
+    .where(eq(workspaces.id, adminWorkspaceId));
 
   // Templates builtin: valida com o zod do core e faz upsert por slug (workspace NULL)
   for (const seed of [gameCodesTemplate, genericArticleTemplate]) {

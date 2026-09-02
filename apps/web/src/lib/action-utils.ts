@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { requireSession } from '@/lib/auth';
+import { requireSession, type SessionInfo } from '@/lib/auth';
 
 export type ActionResult<T = null> =
   | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
+  /** `code` permite ao client traduzir a mensagem em vez de exibir a do servidor. */
+  | { ok: false; error: string; code?: string; fieldErrors?: Record<string, string[]> };
 
 /** Violação de FK do Postgres (23503) — inclusive embrulhada pelo drizzle. */
 export function isFkViolation(err: unknown): boolean {
@@ -13,12 +14,7 @@ export function isFkViolation(err: unknown): boolean {
   return isFkViolation((err as { cause?: unknown }).cause);
 }
 
-interface SessionInfo {
-  userId: string;
-  workspaceId: string;
-  email: string;
-  role: 'owner' | 'admin';
-}
+export type { SessionInfo };
 
 /**
  * Padrão de toda mutation: valida sessão → valida input com zod → executa.

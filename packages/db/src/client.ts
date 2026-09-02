@@ -4,6 +4,9 @@ import * as schema from './schema';
 
 export type Db = NodePgDatabase<typeof schema>;
 
+/** Handle de transação: mesma API do Db, dentro de db.transaction(). */
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
 export function createDb(connectionString?: string): Db {
   const url = connectionString ?? process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL não definida');

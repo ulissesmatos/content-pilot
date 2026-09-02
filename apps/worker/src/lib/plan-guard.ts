@@ -8,24 +8,28 @@ import {
   runs,
   sql,
   subscriptions,
-  users,
+  workspaces,
   type Db,
 } from '@content-pilot/db';
 import { effectivePlan, PlanLimitError, PLANS, type PlanDef } from '@content-pilot/core';
 
 /**
  * Enforcement de plano (Fase 5) — tudo determinístico, verificado ANTES de
- * gastar IA. Workspaces com usuário admin da plataforma são isentos
- * (plano interno `unlimited`); sem linha em subscriptions = free.
+ * gastar IA. Isenção só via `workspaces.billingBypass` (concedida pelo super
+ * admin); sem linha em subscriptions = free.
+ *
+ * A isenção NÃO é derivada de cargo: antes bastava haver um usuário admin no
+ * workspace para ele virar ilimitado, o que vazaria uso gratuito assim que
+ * admins pudessem ser promovidos pelo painel.
  */
 
 export async function getWorkspacePlan(db: Db, workspaceId: string): Promise<PlanDef> {
-  const [admin] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.workspaceId, workspaceId), eq(users.role, 'admin')))
+  const [ws] = await db
+    .select({ billingBypass: workspaces.billingBypass })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
     .limit(1);
-  if (admin) return PLANS.unlimited;
+  if (ws?.billingBypass) return PLANS.unlimited;
 
   const [sub] = await db
     .select({ plan: subscriptions.plan, status: subscriptions.status })

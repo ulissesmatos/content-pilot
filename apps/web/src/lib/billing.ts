@@ -1,17 +1,24 @@
 import 'server-only';
 import { and, eq, gte, sql } from 'drizzle-orm';
-import { getDb, llmCalls, runItems, subscriptions, users } from '@content-pilot/db';
+import { getDb, llmCalls, runItems, subscriptions, workspaces } from '@content-pilot/db';
 import { effectivePlan, PLANS, type PlanDef } from '@content-pilot/core';
 
-/** Plano efetivo do workspace no painel (espelha o plan-guard do worker). */
+/**
+ * Plano efetivo do workspace no painel (espelha o plan-guard do worker).
+ *
+ * A isenção vem de `workspaces.billingBypass`, concedida explicitamente pelo
+ * super admin. Antes ela era derivada de "existe algum usuário admin neste
+ * workspace", o que daria uso ilimitado de graça ao workspace de todo admin
+ * assim que a promoção de admins virasse uma ação do painel.
+ */
 export async function getWorkspacePlan(workspaceId: string): Promise<PlanDef> {
   const db = getDb();
-  const [admin] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.workspaceId, workspaceId), eq(users.role, 'admin')))
+  const [ws] = await db
+    .select({ billingBypass: workspaces.billingBypass })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
     .limit(1);
-  if (admin) return PLANS.unlimited;
+  if (ws?.billingBypass) return PLANS.unlimited;
 
   const [sub] = await db
     .select({ plan: subscriptions.plan, status: subscriptions.status })

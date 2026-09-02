@@ -1,6 +1,7 @@
 'use client';
 
-import { LogOut } from 'lucide-react';
+import Link from 'next/link';
+import { LogOut, Shield } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { logoutAction } from '@/actions/auth';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -14,8 +15,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-export function UserMenu({ email }: { email: string }) {
+export function UserMenu({ email, isAdmin = false }: { email: string; isAdmin?: boolean }) {
   const t = useTranslations('auth');
+  const tn = useTranslations('nav');
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
@@ -30,6 +32,14 @@ export function UserMenu({ email }: { email: string }) {
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="truncate font-normal">{email}</DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {isAdmin ? (
+          <DropdownMenuItem asChild>
+            <Link href="/admin">
+              <Shield className="size-4" />
+              {tn('admin')}
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem onClick={() => logoutAction()}>
           <LogOut className="size-4" />
           {t('logout')}

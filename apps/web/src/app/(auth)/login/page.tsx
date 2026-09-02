@@ -1,14 +1,38 @@
 'use client';
 
-import { useActionState } from 'react';
+import { Suspense, useActionState } from 'react';
 import Link from 'next/link';
-import { Loader2, Rocket } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Loader2, Rocket, ShieldOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { loginAction } from '@/actions/auth';
+import { loginAction, logoutAction } from '@/actions/auth';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+/**
+ * Aviso para quem foi bloqueado no meio da sessão: o cookie ainda existe, mas
+ * o acesso acabou. O botão de sair é o que limpa a sessão morta.
+ */
+function BlockedNotice() {
+  const t = useTranslations('auth');
+  const blocked = useSearchParams().has('blocked');
+  if (!blocked) return null;
+  return (
+    <Alert variant="warning">
+      <ShieldOff />
+      <AlertTitle>{t('blockedTitle')}</AlertTitle>
+      <AlertDescription>
+        <p>{t('blockedDescription')}</p>
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => logoutAction()}>
+          {t('logout')}
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 export default function LoginPage() {
   const t = useTranslations('auth');
@@ -24,6 +48,9 @@ export default function LoginPage() {
           </div>
           <span className="text-xl font-semibold">{tc('appName')}</span>
         </div>
+        <Suspense fallback={null}>
+          <BlockedNotice />
+        </Suspense>
         <Card>
           <CardHeader>
             <CardTitle>{t('loginTitle')}</CardTitle>

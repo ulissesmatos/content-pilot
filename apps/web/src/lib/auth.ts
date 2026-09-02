@@ -138,6 +138,19 @@ async function getFreshUser(userId: string): Promise<FreshUser | null> {
   return value;
 }
 
+/**
+ * Conta autenticada porém bloqueada (suspensa/banida/excluída). Separada do
+ * "não autenticado" porque o tratamento é outro: o cookie dela ainda é
+ * válido, então mandá-la para /login sem mais nada geraria loop — o
+ * middleware veria sessão viva e devolveria para /.
+ */
+export class AccountBlockedError extends Error {
+  constructor() {
+    super('Esta conta está indisponível. Fale com o suporte.');
+    this.name = 'AccountBlockedError';
+  }
+}
+
 export interface SessionInfo {
   userId: string;
   workspaceId: string;
@@ -158,7 +171,7 @@ export async function requireSession(): Promise<SessionInfo> {
 
   const superAdmin = isSuperAdmin(fresh.email);
   if (!superAdmin && (fresh.deleted || fresh.status !== 'active')) {
-    throw new Error('Esta conta está indisponível. Fale com o suporte.');
+    throw new AccountBlockedError();
   }
 
   return {

@@ -17,7 +17,11 @@ export const authConfig = {
       const isPublic =
         nextUrl.pathname.startsWith('/login') || nextUrl.pathname.startsWith('/register');
       if (isPublic) {
-        if (isLoggedIn) return Response.redirect(new URL('/', nextUrl));
+        // `?blocked=1` = conta bloqueada com cookie ainda válido. Sem esta
+        // exceção o par (layout manda para /login, middleware devolve para /)
+        // vira loop infinito.
+        const isBlockedNotice = nextUrl.searchParams.has('blocked');
+        if (isLoggedIn && !isBlockedNotice) return Response.redirect(new URL('/', nextUrl));
         return true;
       }
       if (nextUrl.pathname.startsWith('/admin')) {

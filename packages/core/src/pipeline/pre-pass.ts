@@ -101,6 +101,37 @@ function tokenRegexFrom(valuePattern: string): RegExp {
   }
 }
 
+/**
+ * Intervalos [início, fim) ao redor de cada ocorrência de keyword, já
+ * mesclados quando se sobrepõem.
+ *
+ * Trabalhamos com intervalos sobre o texto completo em vez de fatiá-lo: uma
+ * fatia que comece no miolo de "FRUIT20" produz o token "IT20", que parece
+ * código (tem dígito), não está na lista publicada e dispararia uma chamada
+ * de IA à toa — justamente no modo que existe para evitá-la.
+ */
+function windowsAround(lowerText: string, keywords: string[], windowChars: number): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  for (const kw of keywords) {
+    let from = 0;
+    for (let guard = 0; guard < 500; guard++) {
+      const idx = lowerText.indexOf(kw, from);
+      if (idx === -1) break;
+      from = idx + kw.length;
+      ranges.push([Math.max(0, idx - windowChars), Math.min(lowerText.length, idx + kw.length + windowChars)]);
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+
+  const merged: Array<[number, number]> = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([...r] as [number, number]);
+  }
+  return merged;
+}
+
 export function prePassCheck(input: PrePassInput): PrePassResult {
   const keywords = input.keywords?.length ? input.keywords : DEFAULT_PREPASS_KEYWORDS;
   const windowChars = input.keywordWindowChars ?? 300;
@@ -110,29 +141,25 @@ export function prePassCheck(input: PrePassInput): PrePassResult {
   // Sinal 1: valor ativo publicado que não aparece mais em nenhuma fonte
   const missing = input.lastActiveValues.filter((v) => v.trim() && !contextNorm.includes(normalize(v)));
 
-  // Sinal 2: tokens code-like perto de keywords que não estão publicados
+  // Sinal 2: tokens code-like perto de keywords que não estão publicados.
+  // O casamento roda no texto COMPLETO (tokens sempre inteiros) e só depois
+  // filtramos os que caem nas janelas das keywords.
   const lower = input.searchContext.toLowerCase();
-  const tokenRe = tokenRegexFrom(input.valuePattern);
+  const windows = windowsAround(lower, keywords, windowChars);
   const candidates = new Set<string>();
 
-  for (const kw of keywords) {
-    let from = 0;
-    for (let guard = 0; guard < 500; guard++) {
-      const idx = lower.indexOf(kw, from);
-      if (idx === -1) break;
-      from = idx + kw.length;
-      const start = Math.max(0, idx - windowChars);
-      const end = Math.min(input.searchContext.length, idx + kw.length + windowChars);
-      const window = input.searchContext.slice(start, end);
-      for (const match of window.matchAll(tokenRe)) {
-        const token = match[0];
-        if (!tokenLooksLikeCode(token)) continue;
-        if (lastValuesNorm.has(normalize(token))) continue;
-        // keywords em caixa alta/baixa não são códigos
-        if (keywords.includes(token.toLowerCase())) continue;
-        candidates.add(token);
-        if (candidates.size >= 200) break;
-      }
+  if (windows.length > 0) {
+    const tokenRe = tokenRegexFrom(input.valuePattern);
+    for (const match of input.searchContext.matchAll(tokenRe)) {
+      const token = match[0];
+      const at = match.index ?? 0;
+      // basta encostar na janela — sensibilidade sobre precisão (ver topo)
+      if (!windows.some(([start, end]) => at < end && at + token.length > start)) continue;
+      if (!tokenLooksLikeCode(token)) continue;
+      if (lastValuesNorm.has(normalize(token))) continue;
+      // keywords em caixa alta/baixa não são códigos
+      if (keywords.includes(token.toLowerCase())) continue;
+      candidates.add(token);
       if (candidates.size >= 200) break;
     }
   }

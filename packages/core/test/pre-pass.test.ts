@@ -73,6 +73,41 @@ describe('prePassCheck', () => {
     });
     expect(r.newCandidates).toEqual([]);
   });
+
+  /**
+   * Regressão: a janela ao redor da keyword já foi uma fatia do texto
+   * (`slice`), que cortava um código ao meio quando a borda caía no seu miolo.
+   * O fragmento parecia código (tem dígito) e não batia com a lista publicada,
+   * virando falso positivo que disparava uma chamada de IA no modo econômico.
+   */
+  it('borda da janela no meio de um código não gera candidato fragmentado', () => {
+    // "codes" no índice 8; com janela de 5 a fatia começaria no índice 3,
+    // dentro de "FRUIT20", produzindo o fragmento "IT20"
+    const r = prePassCheck({
+      searchContext: 'FRUIT20 codes',
+      lastValues: ['FRUIT20'],
+      lastActiveValues: ['FRUIT20'],
+      valuePattern: PATTERN,
+      keywordWindowChars: 5,
+    });
+    expect(r.newCandidates).toEqual([]);
+    expect(r.changed).toBe(false);
+  });
+
+  it('mesmo com o código longe do início, o corte não fragmenta', () => {
+    // "ALUCINADO1" em [201,211) e "codes" em 212; janela de 6 cortaria em 206,
+    // produzindo o fragmento "NADO1"
+    const filler = 'x'.repeat(200);
+    const r = prePassCheck({
+      searchContext: `${filler} ALUCINADO1 codes ${filler}`,
+      lastValues: ['ALUCINADO1'],
+      lastActiveValues: ['ALUCINADO1'],
+      valuePattern: PATTERN,
+      keywordWindowChars: 6,
+    });
+    expect(r.newCandidates).toEqual([]);
+    expect(r.changed).toBe(false);
+  });
 });
 
 describe('buildTrimmedContext', () => {

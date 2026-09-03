@@ -2,12 +2,13 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { eq } from 'drizzle-orm';
 import { getDb, subscriptions } from '@content-pilot/db';
-import { getStripe, planFromPriceId, subscriptionPeriodEnd } from '@/lib/stripe';
+import { getStripe, getStripeWebhookSecret, planFromPriceId, subscriptionPeriodEnd } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
 
 /**
- * Webhook do Stripe (Fase 5). Assinatura verificada com STRIPE_WEBHOOK_SECRET —
+ * Webhook do Stripe (Fase 5). Assinatura verificada com o webhook secret do
+ * vault (ou do .env, como reserva) —
  * requisições sem assinatura válida são rejeitadas (401). Idempotente: cada
  * evento faz upsert do estado da assinatura do workspace; eventos repetidos ou
  * fora de ordem convergem para o estado atual do objeto no Stripe.
@@ -20,19 +21,22 @@ export const runtime = 'nodejs';
  *                                       até o Stripe cancelar de vez)
  */
 export async function POST(req: Request) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
-    console.error('[stripe] STRIPE_WEBHOOK_SECRET não configurada');
-    return NextResponse.json({ error: 'webhook não configurado' }, { status: 500 });
-  }
-
+  // Header primeiro: é a rejeição mais barata de uma requisição não
+  // autenticada, e evita ir ao banco buscar o segredo por causa de ruído.
   const signature = req.headers.get('stripe-signature');
   if (!signature) return NextResponse.json({ error: 'assinatura ausente' }, { status: 401 });
+
+  const secret = await getStripeWebhookSecret();
+  if (!secret) {
+    console.error('[stripe] webhook secret não configurado (vault nem .env)');
+    return NextResponse.json({ error: 'webhook não configurado' }, { status: 500 });
+  }
 
   const payload = await req.text();
   let event: Stripe.Event;
   try {
-    event = getStripe().webhooks.constructEvent(payload, signature, secret);
+    const stripe = await getStripe();
+    event = stripe.webhooks.constructEvent(payload, signature, secret);
   } catch (err) {
     console.error('[stripe] assinatura inválida:', err instanceof Error ? err.message : err);
     return NextResponse.json({ error: 'assinatura inválida' }, { status: 401 });
@@ -52,7 +56,8 @@ export async function POST(req: Request) {
           typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
         const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
         if (!subscriptionId) break;
-        const sub = await getStripe().subscriptions.retrieve(subscriptionId);
+        const stripe = await getStripe();
+        const sub = await stripe.subscriptions.retrieve(subscriptionId);
         await applySubscription(workspaceId, sub, customerId ?? null);
         break;
       }

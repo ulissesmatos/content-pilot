@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, ScrollText, Shield, ShieldCheck, Users } from 'lucide-react';
+import { ArrowLeft, KeyRound, ScrollText, Settings, Shield, ShieldCheck, Users } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -25,6 +25,12 @@ import {
 const NAV_PLATFORM = [
   { key: 'navUsers', href: '/admin/users', icon: Users },
   { key: 'navAudit', href: '/admin/audit', icon: ScrollText },
+] as const;
+
+/** Só o super admin: chaves e cobrança movimentam dinheiro da operação. */
+const NAV_CONFIG = [
+  { key: 'navAiKeys', href: '/admin/ai/keys', icon: KeyRound },
+  { key: 'navSettings', href: '/admin/settings', icon: Settings },
 ] as const;
 
 function isActive(pathname: string, href: string) {
@@ -92,6 +98,29 @@ export function AdminSidebar({ isSuperAdmin }: { isSuperAdmin: boolean }) {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {isSuperAdmin ? (
+          <SidebarGroup>
+            <SidebarGroupLabel>{t('groupConfig')}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {NAV_CONFIG.map((item) => (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(pathname, item.href)}
+                      tooltip={t(item.key)}
+                    >
+                      <Link href={item.href}>
+                        <item.icon />
+                        <span>{t(item.key)}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       <SidebarFooter>

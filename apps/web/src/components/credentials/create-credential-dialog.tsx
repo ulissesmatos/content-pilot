@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { CredentialForm } from './credential-form';
 
-export function CreateCredentialDialog({ isAdmin = false }: { isAdmin?: boolean }) {
+export function CreateCredentialDialog() {
   const [open, setOpen] = useState(false);
 
   return (
@@ -31,7 +31,7 @@ export function CreateCredentialDialog({ isAdmin = false }: { isAdmin?: boolean 
             O segredo é criptografado no banco e nunca é exibido novamente.
           </DialogDescription>
         </DialogHeader>
-        <CredentialForm isAdmin={isAdmin} onSuccess={() => setOpen(false)} />
+        <CredentialForm onSuccess={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

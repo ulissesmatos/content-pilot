@@ -1,27 +1,69 @@
 import 'server-only';
 import Stripe from 'stripe';
-import type { PlanId } from '@content-pilot/core';
+import { getDb } from '@content-pilot/db';
+import { getSetting } from '@content-pilot/db';
+import {
+  SETTINGS_KEYS,
+  STRIPE_SETTINGS_DEFAULT,
+  stripeSettingsSchema,
+  type PlanId,
+} from '@content-pilot/core';
+import { readPlatformCredential, resolveSecretField } from '@/lib/platform-secrets';
 
 /**
- * Cliente Stripe (Fase 5). A versão da API fica pinada pelo SDK (stripe-node
- * v22) — não fixamos apiVersion aqui para não divergir dos types do SDK.
- * Preços: cada plano comprável tem um Price recorrente no Stripe, mapeado por
- * env (STRIPE_PRICE_STARTER / STRIPE_PRICE_PRO).
+ * Cliente Stripe. A versão da API fica pinada pelo SDK (stripe-node v22) —
+ * não fixamos apiVersion aqui para não divergir dos types do SDK.
+ *
+ * Os segredos vêm do vault (credencial de plataforma do tipo `stripe`), com
+ * as variáveis STRIPE_* do .env como reserva. Assim dá para trocar a chave
+ * pelo painel sem deploy, e uma instalação antiga que só tem .env continua
+ * funcionando sem migração manual.
  */
 
-let cached: Stripe | null = null;
-
-export function getStripe(): Stripe {
-  if (!cached) {
-    const key = process.env.STRIPE_SECRET_KEY;
-    if (!key) throw new Error('STRIPE_SECRET_KEY não definida — configure a cobrança no .env.');
-    cached = new Stripe(key);
-  }
-  return cached;
+export interface StripeSecrets {
+  secretKey: string | null;
+  webhookSecret: string | null;
+  /** De onde veio cada valor — o painel mostra isso ao operador. */
+  secretKeySource: 'db' | 'env' | 'none';
+  webhookSecretSource: 'db' | 'env' | 'none';
+  maskedHint: string | null;
 }
 
-export function isStripeConfigured(): boolean {
-  return Boolean(process.env.STRIPE_SECRET_KEY);
+export async function getStripeSecrets(): Promise<StripeSecrets> {
+  const cred = await readPlatformCredential<{ secretKey?: string; webhookSecret?: string }>('stripe');
+  // resolvido por campo: dá para ter a chave no banco e o webhook ainda no env
+  const secret = resolveSecretField(cred?.payload.secretKey, process.env.STRIPE_SECRET_KEY);
+  const webhook = resolveSecretField(cred?.payload.webhookSecret, process.env.STRIPE_WEBHOOK_SECRET);
+  return {
+    secretKey: secret.value,
+    webhookSecret: webhook.value,
+    secretKeySource: secret.source,
+    webhookSecretSource: webhook.source,
+    maskedHint: cred?.maskedHint ?? null,
+  };
+}
+
+// Cacheado pelo próprio valor da chave: girar o segredo troca o cliente
+// sozinho, sem precisar de invalidação explícita.
+let cachedClient: { key: string; client: Stripe } | null = null;
+
+export async function getStripe(): Promise<Stripe> {
+  const { secretKey } = await getStripeSecrets();
+  if (!secretKey) {
+    throw new Error('Chave secreta do Stripe não configurada — defina em /admin/settings.');
+  }
+  if (cachedClient?.key !== secretKey) {
+    cachedClient = { key: secretKey, client: new Stripe(secretKey) };
+  }
+  return cachedClient.client;
+}
+
+export async function getStripeWebhookSecret(): Promise<string | null> {
+  return (await getStripeSecrets()).webhookSecret;
+}
+
+export async function isStripeConfigured(): Promise<boolean> {
+  return Boolean((await getStripeSecrets()).secretKey);
 }
 
 const PRICE_ENV: Record<string, string | undefined> = {
@@ -46,9 +88,20 @@ export function planFromPriceId(priceId: string | null | undefined): PlanId | nu
   return null;
 }
 
-/** Base URL do painel (success/cancel/portal return). */
-export function appBaseUrl(): string {
-  return (process.env.AUTH_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+/**
+ * Base URL do painel (success/cancel/portal return). O painel pode
+ * sobrescrever o AUTH_URL do .env — útil quando o domínio público difere do
+ * configurado no ambiente.
+ */
+export async function appBaseUrl(): Promise<string> {
+  const settings = await getSetting(
+    getDb(),
+    SETTINGS_KEYS.stripe,
+    stripeSettingsSchema,
+    STRIPE_SETTINGS_DEFAULT,
+  );
+  const base = settings.appBaseUrl ?? process.env.AUTH_URL ?? 'http://localhost:3000';
+  return base.replace(/\/+$/, '');
 }
 
 /**

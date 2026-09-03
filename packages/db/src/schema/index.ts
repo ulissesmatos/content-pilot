@@ -13,5 +13,6 @@ export * from './run-logs';
 export * from './llm-calls';
 export * from './subscriptions';
 export * from './audit-logs';
+export * from './platform-settings';
 export * from './post-source-state';
 export * from './source-cache';

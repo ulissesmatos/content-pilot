@@ -18,7 +18,7 @@ const checkoutSchema = z.object({
 export async function createCheckoutSessionAction(input: unknown): Promise<ActionResult<{ url: string }>> {
   return runAuthedAction(checkoutSchema, input, async ({ plan }, { workspaceId, email }) => {
     if (!PLANS[plan as PlanId]?.purchasable) throw new Error('Plano inválido.');
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const db = getDb();
 
     const [sub] = await db
@@ -37,7 +37,7 @@ export async function createCheckoutSessionAction(input: unknown): Promise<Actio
       .limit(1);
 
     // Reusa o customer se já existir; senão o Checkout cria um novo.
-    const base = appBaseUrl();
+    const base = await appBaseUrl();
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: priceIdForPlan(plan), quantity: 1 }],
@@ -68,9 +68,11 @@ export async function createPortalSessionAction(input: unknown): Promise<ActionR
     if (!sub?.stripeCustomerId) {
       throw new Error('Nenhuma assinatura encontrada — assine um plano primeiro.');
     }
-    const session = await getStripe().billingPortal.sessions.create({
+    const stripe = await getStripe();
+    const base = await appBaseUrl();
+    const session = await stripe.billingPortal.sessions.create({
       customer: sub.stripeCustomerId,
-      return_url: `${appBaseUrl()}/billing`,
+      return_url: `${base}/billing`,
     });
     return { url: session.url };
   });

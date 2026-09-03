@@ -19,7 +19,7 @@ export const credentials = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     workspaceId: uuid('workspace_id').references(() => workspaces.id),
     type: text('type', {
-      enum: ['wordpress', 'anthropic', 'openai', 'openrouter', 'tavily'],
+      enum: ['wordpress', 'anthropic', 'openai', 'openrouter', 'tavily', 'stripe'],
     }).notNull(),
     name: text('name').notNull(),
     ciphertext: text('ciphertext').notNull(),

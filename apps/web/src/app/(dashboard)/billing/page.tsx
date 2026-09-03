@@ -27,13 +27,14 @@ export default async function BillingPage({
   searchParams: Promise<{ checkout?: string }>;
 }) {
   const { workspaceId, role } = await requireSession();
-  const [t, locale, plan, sub, usage, params] = await Promise.all([
+  const [t, locale, plan, sub, usage, params, stripeReady] = await Promise.all([
     getTranslations('billing'),
     getLocale(),
     getWorkspacePlan(workspaceId),
     getSubscription(workspaceId),
     getMonthUsage(workspaceId),
     searchParams,
+    isStripeConfigured(),
   ]);
 
   const nf = new Intl.NumberFormat(locale);
@@ -149,7 +150,7 @@ export default async function BillingPage({
 
       {!isUnlimited && role !== 'admin' ? (
         <div className="mt-6">
-          {!isStripeConfigured() ? (
+          {!stripeReady ? (
             <p className="text-muted-foreground text-sm">{t('notConfigured')}</p>
           ) : (
             <div className="grid gap-6 md:grid-cols-2">

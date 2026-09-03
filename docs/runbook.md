@@ -26,7 +26,10 @@
    docker compose -f docker-compose.prod.yml up -d --build
    ```
    O serviço `migrate` roda migrations + seed e termina; `web`, `worker` e `caddy` ficam de pé com `restart: unless-stopped`.
-6. Acesse `https://pilot.seudominio.com`, faça login com ADMIN_EMAIL/ADMIN_PASSWORD e cadastre as credenciais (WordPress, Tavily, provedor de IA) em Credenciais.
+6. Acesse `https://pilot.seudominio.com` e faça login com ADMIN_EMAIL/ADMIN_PASSWORD.
+   - **Chaves da plataforma** (IA e busca, usadas por quem não traz chave própria): `/admin/ai/keys`.
+   - **Cobrança** (chave secreta e webhook do Stripe): `/admin/settings`.
+   - Credenciais do WordPress continuam por site, em Credenciais.
 
 ## Atualizar a aplicação
 
@@ -54,6 +57,18 @@ gunzip -c backup.sql.gz | docker exec -i $(docker ps -qf name=postgres) psql -U 
    `VAULT_MASTER_KEYS=k1:<antiga>,k2:<nova>` e `VAULT_ACTIVE_KEY_ID=k2`
 2. Recrie os serviços: `docker compose -f docker-compose.prod.yml up -d`
 3. Novas credenciais passam a usar k2; as antigas continuam legíveis pela k1. Para migrar as antigas, re-salve cada credencial no painel (excluir/recriar) e então remova `k1:` do `.env`.
+4. As credenciais da **plataforma** também precisam ser re-salvas: `/admin/ai/keys` e `/admin/settings`. Basta colar a chave de novo — o formulário regrava com a chave ativa.
+
+## Segredos: cofre x .env
+
+As chaves do Stripe são lidas **primeiro do cofre** (credencial de plataforma, tabela `credentials` com `workspace_id NULL`) e só depois das variáveis `STRIPE_*` do `.env`, campo a campo. Consequências práticas:
+
+- Dá para girar a chave em `/admin/settings` sem deploy.
+- Uma instalação antiga que só tem `.env` continua funcionando sem migração.
+- Depois de salvar pelo painel, o valor do `.env` fica ignorado para aquele campo — o painel mostra a origem de cada um.
+- Toda gravação carimba a versão da config; o worker enxerga a chave nova em até 30 segundos.
+
+Nenhum segredo aparece na auditoria: `/admin/audit` registra quais campos mudaram, nunca o valor.
 
 ## Diagnóstico
 

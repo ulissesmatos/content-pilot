@@ -415,6 +415,9 @@
     "filter": "Filter",
     "never": "never",
     "lockedSuperAdmin": "Super admin — protected",
-    "lockedSelf": "Your account"
+    "lockedSelf": "Your account",
+    "groupConfig": "Configuration",
+    "navAiKeys": "AI keys",
+    "navSettings": "Billing & URLs"
   }
 }

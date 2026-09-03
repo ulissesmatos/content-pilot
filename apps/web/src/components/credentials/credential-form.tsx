@@ -25,16 +25,13 @@ interface CreatedCredential {
 /** Form de criação de credencial reutilizado pelo diálogo da página e pela criação rápida embutida em outros forms. */
 export function CredentialForm({
   defaultType = 'wordpress',
-  isAdmin = false,
   onSuccess,
 }: {
   defaultType?: CredentialType;
   /** Admin da plataforma pode criar credenciais globais (fallback de todos os workspaces). */
-  isAdmin?: boolean;
   onSuccess: (credential: CreatedCredential) => void;
 }) {
   const [type, setType] = useState<CredentialType>(defaultType);
-  const [scope, setScope] = useState<'workspace' | 'platform'>('workspace');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
   const submittingRef = useRef(false);
@@ -51,7 +48,6 @@ export function CredentialForm({
           username: formData.get('username') ?? undefined,
           appPassword: formData.get('appPassword') ?? undefined,
           apiKey: formData.get('apiKey') ?? undefined,
-          scope: type === 'wordpress' ? 'workspace' : scope,
         });
         if (result.ok) {
           toast.success('Credencial salva com criptografia AES-256-GCM.');
@@ -114,23 +110,6 @@ export function CredentialForm({
             <Input id="cred-apikey" name="apiKey" type="password" autoComplete="off" required />
             {err('apiKey') ? <p className="text-destructive text-xs">{err('apiKey')}</p> : null}
           </div>
-          {isAdmin ? (
-            <div className="space-y-2">
-              <Label>Escopo</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v as 'workspace' | 'platform')}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="workspace">Este workspace</SelectItem>
-                  <SelectItem value="platform">Plataforma (fallback de todos os clientes)</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-muted-foreground text-xs">
-                Credencial da plataforma é usada por workspaces sem chave própria (clientes SaaS).
-              </p>
-            </div>
-          ) : null}
         </>
       )}
       <DialogFooter>

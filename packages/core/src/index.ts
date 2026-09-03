@@ -1,6 +1,8 @@
 // @content-pilot/core — toda a lógica de negócio vive aqui.
 export * from './vault';
 export * from './billing/plans';
+export * from './settings/schemas';
+export * from './settings/redact';
 export * from './cms/types';
 export * from './cms/wordpress';
 export * from './http/fetch-retry';

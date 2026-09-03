@@ -1,4 +1,4 @@
-import { desc, eq, isNull, or } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { KeyRound } from 'lucide-react';
 import { credentials, getDb } from '@content-pilot/db';
 import { CreateCredentialDialog } from '@/components/credentials/create-credential-dialog';
@@ -22,18 +22,14 @@ import { requireSession } from '@/lib/auth';
 export const metadata = { title: 'Credenciais' };
 
 export default async function CredentialsPage() {
-  const { workspaceId, role } = await requireSession();
-  const isAdmin = role === 'admin';
+  const { workspaceId } = await requireSession();
   const [t, locale] = await Promise.all([getTranslations('credentials'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
-  // admin também enxerga as credenciais da plataforma (workspace NULL)
-  const scopeFilter = isAdmin
-    ? or(eq(credentials.workspaceId, workspaceId), isNull(credentials.workspaceId))
-    : eq(credentials.workspaceId, workspaceId);
+  // Só as credenciais do próprio workspace: as chaves da plataforma são
+  // gerenciadas em /admin/ai/keys e não aparecem no painel do cliente.
   const rows = await getDb()
     .select({
       id: credentials.id,
-      workspaceId: credentials.workspaceId,
       type: credentials.type,
       name: credentials.name,
       maskedHint: credentials.maskedHint,
@@ -41,13 +37,13 @@ export default async function CredentialsPage() {
       createdAt: credentials.createdAt,
     })
     .from(credentials)
-    .where(scopeFilter)
+    .where(eq(credentials.workspaceId, workspaceId))
     .orderBy(desc(credentials.createdAt));
 
   return (
     <>
       <PageHeader title={t('title')} description={t('description')}>
-        <CreateCredentialDialog isAdmin={isAdmin} />
+        <CreateCredentialDialog />
       </PageHeader>
       {rows.length === 0 ? (
         <EmptyState icon={KeyRound} title={t('emptyTitle')} description={t('emptyDescription')} />
@@ -70,11 +66,6 @@ export default async function CredentialsPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">
                       {row.name}
-                      {row.workspaceId === null ? (
-                        <Badge variant="outline" className="ml-2 text-xs">
-                          {t('platformBadge')}
-                        </Badge>
-                      ) : null}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{credentialTypeLabel(row.type)}</Badge>

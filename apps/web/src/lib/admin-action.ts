@@ -2,6 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { auditLogs, getDb, type Tx } from '@content-pilot/db';
+import { redactSecrets } from '@content-pilot/core';
 import { requireAdmin, type SessionInfo } from '@/lib/auth';
 import { requestContext } from '@/lib/request-context';
 import { consumeRateLimit } from '@/lib/rate-limit';
@@ -51,44 +52,11 @@ export interface AdminHandlerContext {
   audit: (patch: AdminAuditPatch) => void;
 }
 
-/** Campos cujo valor nunca pode ir para a auditoria. */
-const SECRET_KEY_RE = /(secret|password|passwd|token|api[-_]?key|private|ciphertext|credential)/i;
-/** Identificadores que casam com o regex acima mas não são segredo. */
-const NOT_SECRET = new Set([
-  'keyId',
-  'key_id',
-  'maskedHint',
-  'masked_hint',
-  'stripePriceId',
-  'stripe_price_id',
-  'stripeCustomerId',
-  'stripe_customer_id',
-  'stripeSubscriptionId',
-  'stripe_subscription_id',
-  'credentialId',
-  'credential_id',
-]);
-
 const MAX_DIFF_CHARS = 8_000;
-
-function redact(value: unknown, depth = 0): unknown {
-  if (depth > 6) return '[aninhado demais]';
-  if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1));
-  if (value instanceof Date) return value.toISOString();
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) {
-      out[k] = !NOT_SECRET.has(k) && SECRET_KEY_RE.test(k) ? '***' : redact(v, depth + 1);
-    }
-    return out;
-  }
-  if (typeof value === 'string' && value.length > 500) return `${value.slice(0, 500)}…`;
-  return value;
-}
 
 function safeDiff(diff: unknown): unknown {
   if (diff === undefined) return null;
-  const redacted = redact(diff);
+  const redacted = redactSecrets(diff);
   const serialized = JSON.stringify(redacted);
   if (serialized && serialized.length > MAX_DIFF_CHARS) {
     return { truncated: true, preview: serialized.slice(0, MAX_DIFF_CHARS) };

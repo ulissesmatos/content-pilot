@@ -43,6 +43,13 @@
       "when": 1788386436958,
       "tag": "0005_solid_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788454460133,
+      "tag": "0006_flaky_spot",
+      "breakpoints": true
     }
   ]
 }

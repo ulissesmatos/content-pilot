@@ -17,8 +17,6 @@ const createJobSchema = z.object({
   language: z.string().optional(),
   tags: z.string().default(''),
   categories: z.string().default(''),
-  provider: z.enum(['anthropic', 'openai', 'openrouter']),
-  model: z.string().min(1),
   maxPostsPerRun: z.coerce.number().int().min(1).max(100).default(10),
   tokenBudgetPerRun: z.coerce.number().int().positive().default(500_000),
   skipIfSourcesUnchanged: z.boolean().default(true),
@@ -51,7 +49,8 @@ export async function createJobAction(input: unknown): Promise<ActionResult<{ id
       throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     const [job] = await db
       .insert(contentJobs)
       .values({
@@ -68,7 +67,7 @@ export async function createJobAction(input: unknown): Promise<ActionResult<{ id
         scheduleCron: data.scheduleCron,
         timezone: data.timezone,
         language: data.language || null,
-        llmConfig: jobLlmConfigSchema.parse({ generate: llmTask, verify: llmTask }),
+        llmConfig: jobLlmConfigSchema.parse({}),
         limits: jobLimitsSchema.parse({
           maxPostsPerRun: data.maxPostsPerRun,
           tokenBudgetPerRun: data.tokenBudgetPerRun,
@@ -115,7 +114,8 @@ export async function updateJobAction(input: unknown): Promise<ActionResult<{ id
       throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     await db
       .update(contentJobs)
       .set({
@@ -130,7 +130,7 @@ export async function updateJobAction(input: unknown): Promise<ActionResult<{ id
         scheduleCron: data.scheduleCron,
         timezone: data.timezone,
         language: data.language || null,
-        llmConfig: jobLlmConfigSchema.parse({ generate: llmTask, verify: llmTask }),
+        llmConfig: jobLlmConfigSchema.parse({}),
         limits: jobLimitsSchema.parse({
           maxPostsPerRun: data.maxPostsPerRun,
           tokenBudgetPerRun: data.tokenBudgetPerRun,

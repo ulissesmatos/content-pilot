@@ -16,7 +16,6 @@ import {
 import {
   autopilotDiscoverySchema,
   autopilotLimitsSchema,
-  autopilotLlmConfigSchema,
   type ContentType,
 } from '@content-pilot/core';
 import {
@@ -41,7 +40,6 @@ export const metadata = { title: 'Autopilot' };
 /** Extrai os valores editáveis de um config para pré-preencher o form de edição. */
 function toInitial(config: typeof autopilotConfigs.$inferSelect) {
   const discovery = autopilotDiscoverySchema.parse(config.discovery);
-  const llm = autopilotLlmConfigSchema.parse(config.llmConfig);
   const limits = autopilotLimitsSchema.parse(config.limits ?? {});
   return {
     id: config.id,
@@ -55,8 +53,6 @@ function toInitial(config: typeof autopilotConfigs.$inferSelect) {
     publishMode: config.publishMode as 'draft' | 'publish',
     postsPerCycle: discovery.postsPerCycle,
     allowedTypes: discovery.allowedTypes,
-    provider: llm.generate.provider,
-    model: llm.generate.model,
     monthlyBudgetUsd: limits.monthlyBudgetUsd,
     maxPostsPerDay: limits.maxPostsPerDay,
   };

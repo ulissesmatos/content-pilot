@@ -1,6 +1,8 @@
 export * from './client';
 export * from './config-cache';
 export * from './settings';
+export * from './llm/price-table';
+export * from './billing/model-resolver';
 export * as schema from './schema';
 export * from './schema';
 

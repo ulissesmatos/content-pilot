@@ -418,6 +418,8 @@
     "lockedSelf": "Your account",
     "groupConfig": "Configuration",
     "navAiKeys": "AI keys",
-    "navSettings": "Billing & URLs"
+    "navSettings": "Billing & URLs",
+    "navProfiles": "Model profiles",
+    "navCatalog": "Available models"
   }
 }

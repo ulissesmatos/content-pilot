@@ -418,6 +418,8 @@
     "lockedSelf": "Sua conta",
     "groupConfig": "Configuração",
     "navAiKeys": "Chaves de IA",
-    "navSettings": "Cobrança e URLs"
+    "navSettings": "Cobrança e URLs",
+    "navProfiles": "Perfis de modelo",
+    "navCatalog": "Modelos disponíveis"
   }
 }

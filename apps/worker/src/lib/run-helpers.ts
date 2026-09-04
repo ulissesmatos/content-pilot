@@ -2,6 +2,7 @@ import {
   and,
   count,
   eq,
+  getPriceTable,
   gte,
   inArray,
   llmCalls,
@@ -93,7 +94,13 @@ export function makeCachedExtract(db: Db, workspaceId: string, search: SearchCli
   };
 }
 
-/** Registra as chamadas LLM de um item com custo estimado (um insert só). */
+/**
+ * Registra as chamadas LLM de um item com custo estimado (um insert só).
+ *
+ * A tabela de preços vem do catálogo sincronizado e é buscada aqui, não
+ * recebida por parâmetro: são cinco chamadores, e um que esquecesse de passar
+ * voltaria a gravar custo NULL em silêncio. `getPriceTable` é cacheada.
+ */
 export async function recordLlmCalls(
   db: Db,
   workspaceId: string,
@@ -102,10 +109,11 @@ export async function recordLlmCalls(
   calls: LlmCallRecord[],
 ) {
   if (calls.length === 0) return;
+  const prices = await getPriceTable(db);
   await db.insert(llmCalls).values(
     calls.map((c) => {
-      // custo real do provedor (OpenRouter) quando disponível; senão estimativa por tabela
-      const cost = c.costUsd ?? estimateCostUsd(c.model, c.inputTokens, c.outputTokens);
+      // custo real do provedor (OpenRouter) quando disponível; senão o catálogo
+      const cost = c.costUsd ?? estimateCostUsd(c.model, c.inputTokens, c.outputTokens, prices);
       return {
         workspaceId,
         runId,

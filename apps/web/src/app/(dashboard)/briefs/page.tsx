@@ -58,7 +58,6 @@ export default async function BriefsPage() {
   const hasActive = briefRows.some((r) => r.brief.status === 'queued' || r.brief.status === 'generating');
 
   const toInitial = (brief: (typeof briefRows)[number]['brief']): BriefFormInitial => {
-    const llm = (brief.llmConfig ?? {}) as { generate?: { provider?: string; model?: string } };
     return {
       id: brief.id,
       topic: brief.topic,
@@ -67,8 +66,6 @@ export default async function BriefsPage() {
       targetCategoryWpId: brief.targetCategoryWpId ? String(brief.targetCategoryWpId) : '',
       extraInstructions: brief.extraInstructions ?? '',
       publishMode: brief.publishMode,
-      provider: llm.generate?.provider ?? 'openrouter',
-      model: llm.generate?.model ?? '',
     };
   };
 

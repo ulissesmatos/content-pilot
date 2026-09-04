@@ -34,8 +34,6 @@ export interface BriefFormInitial {
   targetCategoryWpId: string;
   extraInstructions: string;
   publishMode: 'draft' | 'publish';
-  provider: string;
-  model: string;
 }
 
 const LANGUAGES = [
@@ -62,7 +60,6 @@ function BriefDialog({
   const [templateId, setTemplateId] = useState('');
   const [language, setLanguage] = useState(initial?.language ?? 'pt-BR');
   const [publishMode, setPublishMode] = useState<'draft' | 'publish'>(initial?.publishMode ?? 'draft');
-  const [provider, setProvider] = useState(initial?.provider ?? 'openrouter');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
   const submittingRef = useRef(false);
@@ -81,8 +78,6 @@ function BriefDialog({
           targetCategoryWpId: formData.get('categoryId') ?? '',
           extraInstructions: formData.get('extraInstructions') ?? '',
           publishMode,
-          provider,
-          model: formData.get('model'),
         };
         if (isEdit) {
           const result = await updateBriefAction({ ...shared, id: initial.id });
@@ -227,29 +222,6 @@ function BriefDialog({
                   <SelectItem value="publish">Publicar direto</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Provedor de IA</Label>
-              <Select value={provider} onValueChange={setProvider}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="openrouter">OpenRouter</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="brief-model">Modelo</Label>
-              <Input
-                id="brief-model"
-                name="model"
-                defaultValue={initial?.model ?? 'z-ai/glm-5.2'}
-                className="font-mono text-sm"
-                required
-              />
             </div>
           </div>
           <DialogFooter>

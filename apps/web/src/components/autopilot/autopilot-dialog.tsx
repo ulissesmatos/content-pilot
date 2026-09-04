@@ -40,8 +40,6 @@ export interface AutopilotInitial {
   publishMode: 'draft' | 'publish';
   postsPerCycle: number;
   allowedTypes: ContentType[];
-  provider: string;
-  model: string;
   monthlyBudgetUsd: number;
   maxPostsPerDay: number;
 }
@@ -73,7 +71,6 @@ export function AutopilotDialog({
   const [allowedTypes, setAllowedTypes] = useState<ContentType[]>(initial?.allowedTypes ?? []);
   const [autoQueue, setAutoQueue] = useState(initial?.autoQueue ?? false);
   const [publishMode, setPublishMode] = useState<'draft' | 'publish'>(initial?.publishMode ?? 'draft');
-  const [provider, setProvider] = useState(initial?.provider ?? 'anthropic');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
   const submittingRef = useRef(false);
@@ -103,8 +100,6 @@ export function AutopilotDialog({
           publishMode,
           postsPerCycle: formData.get('postsPerCycle'),
           allowedTypes,
-          provider,
-          model: formData.get('model'),
           discoverTokenBudget: formData.get('discoverTokenBudget'),
           monthlyBudgetUsd: formData.get('monthlyBudgetUsd'),
           maxPostsPerDay: formData.get('maxPostsPerDay'),
@@ -270,35 +265,6 @@ export function AutopilotDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Provedor de IA</Label>
-              <Select value={provider} onValueChange={setProvider}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="openrouter">OpenRouter</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ap-model">Modelo</Label>
-              <Input
-                id="ap-model"
-                name="model"
-                defaultValue={initial?.model ?? 'claude-haiku-4-5'}
-                className="font-mono text-sm"
-                required
-              />
-            </div>
-          </div>
-          <p className="text-muted-foreground -mt-2 text-xs">
-            Para a busca de imagens de capa funcionar, use um modelo com visão (ex.: claude-haiku-4-5,
-            gpt-4.1-mini). Modelos sem visão geram o post normalmente, mas sem imagem.
-          </p>
 
           <input type="hidden" name="discoverTokenBudget" value={60000} />
 

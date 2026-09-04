@@ -1,4 +1,4 @@
-import { briefs, eq, runItems, runs, sites, type Db } from '@content-pilot/db';
+import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
 import {
   checkTopicAlreadyCovered,
   injectInlineImages,
@@ -78,15 +78,21 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     const [site] = await db.select().from(sites).where(eq(sites.id, brief.siteId)).limit(1);
     if (!site) throw new Error('site da pauta não existe');
 
+    // O modelo vem do perfil configurado pelo admin; do JSONB da pauta só
+    // aproveitamos o orçamento de tokens.
     const llmConfig = jobLlmConfigSchema.parse(brief.llmConfig ?? {});
     const tokenBudget = llmConfig.tokenBudget ?? 500_000;
     const checkBudget = makeBudgetGuard(db, runId, tokenBudget);
+    const [generateModel, verifyModel] = await Promise.all([
+      resolveTaskModel(db, workspaceId, 'generate'),
+      resolveTaskModel(db, workspaceId, 'verify'),
+    ]);
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveTemplateById(db, brief.templateId, workspaceId),
       resolveSearchClient(db, workspaceId),
-      resolveLlmProvider(db, workspaceId, llmConfig.generate),
-      resolveLlmProvider(db, workspaceId, llmConfig.verify),
+      resolveLlmProvider(db, workspaceId, generateModel),
+      resolveLlmProvider(db, workspaceId, verifyModel),
     ]);
 
     // Anti-repetição: se o tema já foi coberto (posts do WP ou outra pauta que
@@ -194,15 +200,18 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     const categoryId = chosenCategoryId ?? brief.targetCategoryWpId ?? undefined;
 
     // Imagens (Fase 3): capa + imagens do corpo, só quando o template pede.
-    // Reusa o modelo de geração para a visão (precisa suportar imagens; senão,
-    // post sem imagem). A quantidade de imagens do corpo escala com o texto.
+    // A visão tem modelo PRÓPRIO no perfil (purpose `illustrate`): antes ela
+    // reusava o de geração, então trocar aquele para um modelo sem visão
+    // fazia todo post sair sem capa, em silêncio.
     let featuredMediaId: number | undefined;
     let finalHtml = result.finalHtml;
     if (template.config.images.enabled) {
       const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
+      const illustrateModel = await resolveTaskModel(db, workspaceId, 'illustrate');
+      const llmVision = await resolveLlmProvider(db, workspaceId, illustrateModel);
       const { mediaId, inlineImages, llmCalls } = await illustratePost({
         wp,
-        llmVision: llmGenerate,
+        llmVision,
         topic: brief.topic,
         keywords: brief.keywords ?? [],
         language: brief.language,

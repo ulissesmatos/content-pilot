@@ -9,9 +9,15 @@ export const postFilterSchema = z.object({
 });
 export type PostFilter = z.infer<typeof postFilterSchema>;
 
+/**
+ * LEGADO: `provider` e `model` eram escolhidos pelo cliente. Hoje o modelo vem
+ * do perfil configurado pelo admin (model_profiles) e estes campos são
+ * IGNORADOS na execução — ficam opcionais só para as linhas antigas de
+ * content_jobs/briefs/autopilot_configs continuarem validando.
+ */
 export const llmTaskSchema = z.object({
-  provider: z.enum(['anthropic', 'openai', 'openrouter']),
-  model: z.string().min(1),
+  provider: z.enum(['anthropic', 'openai', 'openrouter']).optional(),
+  model: z.string().min(1).optional(),
   /** Credencial específica; ausente = primeira credencial do tipo no workspace. */
   credentialId: z.string().uuid().optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -19,8 +25,8 @@ export const llmTaskSchema = z.object({
 export type LlmTask = z.infer<typeof llmTaskSchema>;
 
 export const jobLlmConfigSchema = z.object({
-  generate: llmTaskSchema,
-  verify: llmTaskSchema,
+  generate: llmTaskSchema.optional(),
+  verify: llmTaskSchema.optional(),
   /** Orçamento de tokens desta geração (pauta). Ausente = default do worker. */
   tokenBudget: z.number().int().positive().optional(),
 });

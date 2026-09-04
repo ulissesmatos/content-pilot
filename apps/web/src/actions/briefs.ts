@@ -24,8 +24,6 @@ const createBriefSchema = z.object({
     }),
   extraInstructions: z.string().max(2000).default(''),
   publishMode: z.enum(['draft', 'publish']).default('draft'),
-  provider: z.enum(['anthropic', 'openai', 'openrouter']),
-  model: z.string().min(1),
 });
 
 async function enqueueBriefGeneration(briefId: string, workspaceId: string): Promise<string> {
@@ -62,7 +60,8 @@ export async function createBriefAction(input: unknown): Promise<ActionResult<{ 
     if (!site) throw new Error('Site não encontrado.');
     await assertTemplateAccessible(data.templateId, workspaceId);
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     const keywords = data.keywords
       .split(',')
       .map((s) => s.trim())
@@ -81,7 +80,7 @@ export async function createBriefAction(input: unknown): Promise<ActionResult<{ 
         extraInstructions: data.extraInstructions.trim() || null,
         publishMode: data.publishMode,
         status: 'queued',
-        llmConfig: jobLlmConfigSchema.parse({ generate: llmTask, verify: llmTask }),
+        llmConfig: jobLlmConfigSchema.parse({}),
       })
       .returning({ id: briefs.id });
 
@@ -112,7 +111,8 @@ export async function updateBriefAction(input: unknown): Promise<ActionResult<{ 
       throw new Error('Só pautas pendentes ou com falha podem ser editadas — depois de gerado, edite o post no WordPress.');
     }
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     const existingLlm = (brief.llmConfig ?? {}) as { tokenBudget?: number };
     const keywords = data.keywords
       .split(',')
@@ -129,8 +129,6 @@ export async function updateBriefAction(input: unknown): Promise<ActionResult<{ 
         extraInstructions: data.extraInstructions.trim() || null,
         publishMode: data.publishMode,
         llmConfig: jobLlmConfigSchema.parse({
-          generate: llmTask,
-          verify: llmTask,
           tokenBudget: existingLlm.tokenBudget,
         }),
         updatedAt: new Date(),

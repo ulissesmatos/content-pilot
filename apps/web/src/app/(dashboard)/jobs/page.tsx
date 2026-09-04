@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { RefreshCw } from 'lucide-react';
 import { contentJobs, contentTemplates, credentials, getDb, sites } from '@content-pilot/db';
-import { jobLimitsSchema, jobLlmConfigSchema, postFilterSchema } from '@content-pilot/core';
+import { jobLimitsSchema, postFilterSchema } from '@content-pilot/core';
 import { CreateJobDialog, EditJobButton, type JobFormInitial } from '@/components/jobs/create-job-dialog';
 import { DeleteJobButton, JobEnabledSwitch, RunNowButton } from '@/components/jobs/job-row-actions';
 import { EmptyState } from '@/components/empty-state';
@@ -46,10 +46,6 @@ export default async function JobsPage() {
     const filter = postFilterSchema.parse(job.postFilter ?? {});
     const limits = jobLimitsSchema.parse(job.limits ?? {});
     // tolerante a llmConfig malformado — o form abre com defaults em vez de derrubar a página
-    const llmParsed = jobLlmConfigSchema.safeParse(job.llmConfig ?? {});
-    const llm = llmParsed.success
-      ? llmParsed.data
-      : { generate: { provider: 'anthropic' as const, model: 'claude-haiku-4-5' } };
     return {
       id: job.id,
       name: job.name,
@@ -59,8 +55,6 @@ export default async function JobsPage() {
       language: job.language ?? '',
       tags: filter.tags.join(', '),
       categories: filter.categories.join(', '),
-      provider: llm.generate.provider,
-      model: llm.generate.model,
       maxPostsPerRun: limits.maxPostsPerRun,
       tokenBudgetPerRun: limits.tokenBudgetPerRun,
       skipIfSourcesUnchanged: limits.skipIfSourcesUnchanged,

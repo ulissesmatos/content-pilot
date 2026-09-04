@@ -21,11 +21,14 @@ export const CONTENT_TYPE_LABELS: Record<ContentType, string> = {
   guide: 'Guia',
 };
 
-/** Config LLM do Autopilot: descoberta (barato) + geração/verificação (reusa o pipeline). */
+/**
+ * LEGADO, como em `llmTaskSchema`: o modelo de cada etapa vem do perfil do
+ * admin. Mantido opcional para as configs já gravadas continuarem validando.
+ */
 export const autopilotLlmConfigSchema = z.object({
-  discover: llmTaskSchema,
-  generate: llmTaskSchema,
-  verify: llmTaskSchema,
+  discover: llmTaskSchema.optional(),
+  generate: llmTaskSchema.optional(),
+  verify: llmTaskSchema.optional(),
 });
 export type AutopilotLlmConfig = z.infer<typeof autopilotLlmConfigSchema>;
 

@@ -3,7 +3,17 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, KeyRound, ScrollText, Settings, Shield, ShieldCheck, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  Boxes,
+  KeyRound,
+  ScrollText,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +40,8 @@ const NAV_PLATFORM = [
 /** Só o super admin: chaves e cobrança movimentam dinheiro da operação. */
 const NAV_CONFIG = [
   { key: 'navAiKeys', href: '/admin/ai/keys', icon: KeyRound },
+  { key: 'navProfiles', href: '/admin/ai/profiles', icon: Sparkles },
+  { key: 'navCatalog', href: '/admin/ai/catalog', icon: Boxes },
   { key: 'navSettings', href: '/admin/settings', icon: Settings },
 ] as const;
 

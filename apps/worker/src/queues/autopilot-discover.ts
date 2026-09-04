@@ -7,13 +7,13 @@ import {
   gte,
   isNotNull,
   llmCalls,
+  resolveTaskModel,
   runs,
   sites,
   sql,
   type Db,
 } from '@content-pilot/db';
 import {
-  autopilotLlmConfigSchema,
   parseAutopilotDiscovery,
   parseAutopilotLimits,
   PlanLimitError,
@@ -67,8 +67,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
 
   try {
     const discovery = parseAutopilotDiscovery(cfg.discovery);
-    const llmConfig = autopilotLlmConfigSchema.parse(cfg.llmConfig);
-    const limits = parseAutopilotLimits(cfg.limits);
+      const limits = parseAutopilotLimits(cfg.limits);
 
     // ---- Kill-switches (Fase 4): tudo determinístico, antes de gastar IA ----
     // 1. Plano do workspace ainda permite gerar posts este mês?
@@ -113,10 +112,11 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
     const [site] = await db.select().from(sites).where(eq(sites.id, cfg.siteId)).limit(1);
     if (!site) throw new Error('site da config não existe');
 
+    const discoverModel = await resolveTaskModel(db, workspaceId, 'discover');
     const [wp, search, llmDiscover] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveSearchClient(db, workspaceId),
-      resolveLlmProvider(db, workspaceId, llmConfig.discover),
+      resolveLlmProvider(db, workspaceId, discoverModel),
     ]);
 
     // Inventário do que já existe: posts recentes do WP + pautas do workspace + temas já descobertos.
@@ -262,7 +262,6 @@ async function createBriefFromCandidate(
   candidate: DiscoveryCandidate,
   generationTokenBudget: number,
 ): Promise<string> {
-  const llmConfig = autopilotLlmConfigSchema.parse(cfg.llmConfig);
   const extra = [
     candidate.angle ? `Ângulo editorial: ${candidate.angle}` : '',
     candidate.suggestedTitle ? `Título sugerido: ${candidate.suggestedTitle}` : '',
@@ -283,11 +282,9 @@ async function createBriefFromCandidate(
       extraInstructions: extra,
       publishMode: cfg.publishMode,
       status: cfg.autoQueue ? 'queued' : 'pending',
-      llmConfig: {
-        generate: llmConfig.generate,
-        verify: llmConfig.verify,
-        tokenBudget: generationTokenBudget,
-      },
+      // O modelo vem do perfil do admin na hora de gerar; a pauta guarda só
+      // o orçamento de tokens.
+      llmConfig: { tokenBudget: generationTokenBudget },
     })
     .returning({ id: briefs.id });
   return brief!.id;

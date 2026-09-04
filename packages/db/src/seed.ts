@@ -4,14 +4,72 @@ import { hash } from 'bcryptjs';
 import { and, eq, isNull } from 'drizzle-orm';
 import { gameCodesTemplate, genericArticleTemplate, parseTemplateConfig } from '@content-pilot/core';
 import { createDb } from './client';
-import { contentTemplates, users, workspaces } from './schema';
+import { contentTemplates, modelProfileEntries, modelProfiles, users, workspaces } from './schema';
 
 config({ path: resolve(import.meta.dirname, '../../../.env') });
 
 /**
  * Seed idempotente: workspace default, usuário admin (ADMIN_EMAIL/ADMIN_PASSWORD
- * do .env) e templates builtin (workspace NULL, read-only no painel).
+ * do .env), templates builtin (workspace NULL, read-only no painel) e os
+ * perfis de modelo usados pelo pipeline.
  */
+
+/**
+ * Perfis iniciais.
+ *
+ * `standard` é o default e reproduz os modelos que já estavam em uso antes de
+ * a escolha sair da mão do cliente — assim ligar o perfil não muda o
+ * comportamento de nenhuma execução existente.
+ *
+ * `illustrate` tem entrada própria e precisa de um modelo COM VISÃO: se
+ * apontasse para o mesmo da geração, trocar aquele por um modelo sem visão
+ * faria todo post sair sem capa, em silêncio.
+ *
+ * Tudo via OpenRouter, inclusive os modelos da Anthropic: é a única chave que
+ * a instalação precisa ter. Semear provider 'anthropic' criaria um perfil que
+ * só falha na execução, porque não há credencial desse tipo.
+ */
+const MODEL_PROFILES = [
+  {
+    slug: 'economy',
+    name: 'Econômico',
+    description: 'Modelos baratos. Menor custo por post, qualidade menor em textos longos.',
+    isDefault: false,
+    entries: {
+      generate: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      verify: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      illustrate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+    },
+  },
+  {
+    slug: 'standard',
+    name: 'Padrão',
+    description: 'Equilíbrio entre custo e qualidade. Usado por quem não tem perfil específico.',
+    isDefault: true,
+    entries: {
+      generate: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
+      verify: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
+      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      illustrate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+    },
+  },
+  {
+    slug: 'premium',
+    name: 'Premium',
+    description: 'Modelos melhores para os planos mais caros. Custo por post maior.',
+    isDefault: false,
+    entries: {
+      generate: { provider: 'openrouter' as const, modelId: 'anthropic/claude-sonnet-4.5' },
+      verify: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
+      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
+      illustrate: { provider: 'openrouter' as const, modelId: 'anthropic/claude-haiku-4.5' },
+    },
+  },
+];
 async function main() {
   const db = createDb();
 
@@ -96,6 +154,47 @@ async function main() {
         isBuiltin: true,
       });
       console.log(`Template builtin criado: ${seed.slug}`);
+    }
+  }
+
+  // Perfis de modelo. Idempotente: cria o que falta e completa purposes
+  // ausentes, mas NÃO sobrescreve escolha que o admin já fez no painel.
+  for (const seed of MODEL_PROFILES) {
+    let [profile] = await db
+      .select({ id: modelProfiles.id })
+      .from(modelProfiles)
+      .where(eq(modelProfiles.slug, seed.slug))
+      .limit(1);
+    if (!profile) {
+      [profile] = await db
+        .insert(modelProfiles)
+        .values({
+          slug: seed.slug,
+          name: seed.name,
+          description: seed.description,
+          isDefault: seed.isDefault,
+        })
+        .returning({ id: modelProfiles.id });
+      console.log(`Perfil de modelo criado: ${seed.slug}`);
+    }
+
+    const existing = await db
+      .select({ purpose: modelProfileEntries.purpose })
+      .from(modelProfileEntries)
+      .where(eq(modelProfileEntries.profileId, profile!.id));
+    const have = new Set(existing.map((e) => e.purpose));
+
+    const missing = Object.entries(seed.entries).filter(([purpose]) => !have.has(purpose as never));
+    if (missing.length > 0) {
+      await db.insert(modelProfileEntries).values(
+        missing.map(([purpose, entry]) => ({
+          profileId: profile!.id,
+          purpose: purpose as 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate',
+          provider: entry.provider,
+          modelId: entry.modelId,
+        })),
+      );
+      console.log(`  ${seed.slug}: ${missing.map(([p]) => p).join(', ')}`);
     }
   }
 

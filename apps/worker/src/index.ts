@@ -14,6 +14,7 @@ import { handleJobRun } from './queues/job-run';
 import { handlePostProcess } from './queues/post-process';
 import { handleBriefGenerate } from './queues/brief-generate';
 import { handleAutopilotDiscover } from './queues/autopilot-discover';
+import { handleCatalogSync } from './queues/catalog-sync';
 
 config({ path: resolve(process.cwd(), '../../.env') });
 
@@ -59,6 +60,13 @@ async function main() {
 
   await boss.work(QUEUE.autopilotDiscover, async (jobs: Array<{ data: AutopilotDiscoverPayload }>) => {
     for (const job of jobs) await handleAutopilotDiscover(db, boss, job.data);
+  });
+
+  // Catálogo de modelos: de madrugada, e sob demanda pelo painel. Alimenta a
+  // lista de escolha do admin e a tabela de preços usada no custo por chamada.
+  await boss.schedule(QUEUE.catalogSync, '0 3 * * *');
+  await boss.work(QUEUE.catalogSync, async () => {
+    await handleCatalogSync(db);
   });
 
   console.log(`[worker] pronto — filas registradas (concorrência post.process: ${concurrency})`);

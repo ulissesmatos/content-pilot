@@ -27,8 +27,6 @@ const createAutopilotSchema = z.object({
   publishMode: z.enum(['draft', 'publish']).default('draft'),
   postsPerCycle: z.coerce.number().int().min(1).max(20).default(3),
   allowedTypes: z.array(z.enum(CONTENT_TYPES)).default([]),
-  provider: z.enum(['anthropic', 'openai', 'openrouter']),
-  model: z.string().min(1),
   discoverTokenBudget: z.coerce.number().int().positive().default(60_000),
   // kill-switches (Fase 4)
   monthlyBudgetUsd: z.coerce.number().positive().max(10_000).default(20),
@@ -77,7 +75,8 @@ export async function createAutopilotAction(input: unknown): Promise<ActionResul
       throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     const [cfg] = await db
       .insert(autopilotConfigs)
       .values({
@@ -97,11 +96,7 @@ export async function createAutopilotAction(input: unknown): Promise<ActionResul
           allowedTypes: data.allowedTypes,
           discoverTokenBudget: data.discoverTokenBudget,
         }),
-        llmConfig: autopilotLlmConfigSchema.parse({
-          discover: llmTask,
-          generate: llmTask,
-          verify: llmTask,
-        }),
+        llmConfig: autopilotLlmConfigSchema.parse({}),
         limits: autopilotLimitsSchema.parse({
           monthlyBudgetUsd: data.monthlyBudgetUsd,
           maxPostsPerDay: data.maxPostsPerDay,
@@ -145,7 +140,8 @@ export async function updateAutopilotAction(input: unknown): Promise<ActionResul
       throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
-    const llmTask = { provider: data.provider, model: data.model };
+    // O modelo vem do perfil do admin (model_profiles); a config guarda só
+    // o que ainda é do cliente.
     await db
       .update(autopilotConfigs)
       .set({
@@ -163,7 +159,7 @@ export async function updateAutopilotAction(input: unknown): Promise<ActionResul
           allowedTypes: data.allowedTypes,
           discoverTokenBudget: data.discoverTokenBudget,
         }),
-        llmConfig: autopilotLlmConfigSchema.parse({ discover: llmTask, generate: llmTask, verify: llmTask }),
+        llmConfig: autopilotLlmConfigSchema.parse({}),
         limits: autopilotLimitsSchema.parse({
           monthlyBudgetUsd: data.monthlyBudgetUsd,
           maxPostsPerDay: data.maxPostsPerDay,

@@ -4,6 +4,7 @@ export const QUEUE = {
   postProcess: 'post.process',
   briefGenerate: 'brief.generate',
   autopilotDiscover: 'autopilot.discover',
+  catalogSync: 'catalog.sync',
 } as const;
 
 export interface JobRunPayload {

@@ -3,12 +3,13 @@ import {
   contentJobs,
   eq,
   postSourceState,
+  resolveTaskModel,
   runItems,
   runs,
   sites,
   type Db,
 } from '@content-pilot/db';
-import { jobLimitsSchema, jobLlmConfigSchema, runPipeline, type PipelineResult } from '@content-pilot/core';
+import { jobLimitsSchema, runPipeline, type PipelineResult } from '@content-pilot/core';
 import {
   resolveLlmProvider,
   resolveSearchClient,
@@ -92,14 +93,17 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
 
   try {
     const limits = jobLimitsSchema.parse(job.limits ?? {});
-    const llmConfig = jobLlmConfigSchema.parse(job.llmConfig ?? {});
-
+    // Modelo definido pelo admin (perfil), não pelo job.
+    const [generateModel, verifyModel] = await Promise.all([
+      resolveTaskModel(db, workspaceId, 'generate'),
+      resolveTaskModel(db, workspaceId, 'verify'),
+    ]);
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveTemplateById(db, job.templateId, workspaceId),
       resolveSearchClient(db, workspaceId),
-      resolveLlmProvider(db, workspaceId, llmConfig.generate),
-      resolveLlmProvider(db, workspaceId, llmConfig.verify),
+      resolveLlmProvider(db, workspaceId, generateModel),
+      resolveLlmProvider(db, workspaceId, verifyModel),
     ]);
 
     const post = await wp.getPost(wpPostId);

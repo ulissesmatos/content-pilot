@@ -37,8 +37,6 @@ export interface JobFormInitial {
   language: string;
   tags: string;
   categories: string;
-  provider: string;
-  model: string;
   maxPostsPerRun: number;
   tokenBudgetPerRun: number;
   skipIfSourcesUnchanged: boolean;
@@ -95,7 +93,6 @@ function JobDialog({
   const [customTime, setCustomTime] = useState('07:00');
   const [useRawCron, setUseRawCron] = useState(!!initial && !initialIsPreset);
   const [rawCron, setRawCron] = useState(initial && !initialIsPreset ? initial.scheduleCron : '');
-  const [provider, setProvider] = useState(initial?.provider ?? 'anthropic');
   const [mode, setMode] = useState<'eco' | 'full'>(initial?.mode ?? 'eco');
   const [searchDepth, setSearchDepth] = useState<'auto' | 'basic' | 'advanced'>(initial?.searchDepth ?? 'auto');
   const [skipUnchanged, setSkipUnchanged] = useState(initial?.skipIfSourcesUnchanged ?? true);
@@ -137,8 +134,6 @@ function JobDialog({
           language: String(formData.get('language') ?? '').trim() || undefined,
           tags: formData.get('tags') ?? '',
           categories: formData.get('categories') ?? '',
-          provider,
-          model: formData.get('model'),
           maxPostsPerRun: formData.get('maxPostsPerRun'),
           tokenBudgetPerRun: formData.get('tokenBudgetPerRun'),
           skipIfSourcesUnchanged: skipUnchanged,
@@ -359,31 +354,6 @@ function JobDialog({
           <p className="text-muted-foreground text-xs">
             {MODE_HINTS[mode]} Busca: {SEARCH_DEPTH_HINTS[searchDepth]}
           </p>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Provedor de IA</Label>
-              <Select value={provider} onValueChange={setProvider}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="openrouter">OpenRouter</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="job-model">Modelo</Label>
-              <Input
-                id="job-model"
-                name="model"
-                defaultValue={initial?.model ?? 'claude-haiku-4-5'}
-                className="font-mono text-sm"
-                required
-              />
-            </div>
-          </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="job-max">Posts por execução</Label>

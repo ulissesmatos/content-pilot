@@ -50,6 +50,13 @@
       "when": 1788454460133,
       "tag": "0006_flaky_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788522321336,
+      "tag": "0007_greedy_fenris",
+      "breakpoints": true
     }
   ]
 }

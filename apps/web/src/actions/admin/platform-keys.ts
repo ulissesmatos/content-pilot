@@ -11,8 +11,10 @@ import { UserFacingError } from '@/lib/errors';
 import type { ActionResult } from '@/lib/action-utils';
 
 /**
- * Chaves de IA/busca da plataforma: o fallback usado por todo workspace que
- * não traz chave própria (ver a cascata em apps/worker/src/lib/resolve.ts).
+ * Chaves de IA/busca da plataforma: reserva exclusiva do workspace do
+ * proprietário (ADMIN_EMAIL). Não são fallback para os demais workspaces —
+ * todo o resto é BYOK. Ver canUsePlatformKeys em
+ * apps/worker/src/lib/platform-access.ts e a cascata em resolve.ts.
  */
 const PROVIDER_TYPES = ['openai', 'openrouter', 'anthropic', 'tavily'] as const;
 

@@ -1,7 +1,14 @@
 import 'server-only';
 import { and, eq, gte, sql } from 'drizzle-orm';
-import { getDb, llmCalls, runItems, subscriptions, workspaces } from '@content-pilot/db';
-import { effectivePlan, PLANS, type PlanDef } from '@content-pilot/core';
+import {
+  getTenantDb,
+  llmCalls,
+  runItems,
+  subscriptions,
+  usesOwnLlmKey,
+  workspaces,
+} from '@content-pilot/db';
+import { effectivePlan, PLANS, withByokConsumption, type PlanDef } from '@content-pilot/core';
 
 /**
  * Plano efetivo do workspace no painel (espelha o plan-guard do worker).
@@ -12,7 +19,7 @@ import { effectivePlan, PLANS, type PlanDef } from '@content-pilot/core';
  * assim que a promoção de admins virasse uma ação do painel.
  */
 export async function getWorkspacePlan(workspaceId: string): Promise<PlanDef> {
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [ws] = await db
     .select({ billingBypass: workspaces.billingBypass })
     .from(workspaces)
@@ -28,8 +35,24 @@ export async function getWorkspacePlan(workspaceId: string): Promise<PlanDef> {
   return effectivePlan(sub);
 }
 
+/** O workspace tem chave de IA própria? Espelha o guard do worker. */
+export async function isByokWorkspace(workspaceId: string): Promise<boolean> {
+  return usesOwnLlmKey(getTenantDb(workspaceId), workspaceId);
+}
+
+/**
+ * Plano para exibir CONSUMO (posts/tokens), com as cotas removidas quando o
+ * workspace traz a própria chave. Para sites e autopilots use
+ * `getWorkspacePlan`: esses limites valem mesmo com BYOK.
+ */
+export async function getConsumptionPlan(workspaceId: string): Promise<PlanDef> {
+  const plan = await getWorkspacePlan(workspaceId);
+  if (plan.id === 'unlimited') return plan;
+  return withByokConsumption(plan, await isByokWorkspace(workspaceId));
+}
+
 export async function getSubscription(workspaceId: string) {
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [sub] = await db
     .select()
     .from(subscriptions)
@@ -46,7 +69,7 @@ export interface UsageSummary {
 
 /** Uso do mês corrente (UTC), para a página de cobrança e para os cards do painel. */
 export async function getMonthUsage(workspaceId: string): Promise<UsageSummary> {
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const now = new Date();
   const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const [postsRow, tokensRow] = await Promise.all([

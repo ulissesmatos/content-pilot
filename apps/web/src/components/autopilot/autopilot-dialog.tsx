@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { CONTENT_TYPE_LABELS, CONTENT_TYPES, CRON_PRESETS, type ContentType } from '@content-pilot/core';
+import { CONTENT_TYPE_LABELS, CONTENT_TYPES, CRON_PRESETS, type ContentType } from '@content-pilot/core/client';
 import { createAutopilotAction, updateAutopilotAction } from '@/actions/autopilot';
 import { QuickCreateSiteDialog } from '@/components/sites/quick-create-site-dialog';
 import { QuickCreateTemplateDialog } from '@/components/templates/quick-create-template-dialog';

@@ -1,4 +1,5 @@
 import { fetchWithRetry, HttpError, type FetchRetryOptions } from '../http/fetch-retry';
+import { publicFetch, publicHttpsUrl } from '../http/public-fetch';
 import type {
   CmsAdapter,
   CmsConnectionResult,
@@ -49,7 +50,9 @@ export class WordPressAdapter implements CmsAdapter {
     credentials: WordPressCredentials,
     private readonly fetchOpts: FetchRetryOptions = {},
   ) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    const url = publicHttpsUrl(baseUrl);
+    if (url.search || url.hash) throw new Error('URL base não pode conter query ou fragmento.');
+    this.baseUrl = url.toString().replace(/\/+$/, '');
     this.authHeader =
       'Basic ' + Buffer.from(`${credentials.username}:${credentials.appPassword}`, 'utf8').toString('base64');
   }
@@ -66,7 +69,7 @@ export class WordPressAdapter implements CmsAdapter {
           ...init.headers,
         },
       },
-      { timeoutMs: 60_000, retries: 3, retryDelayMs: 5_000, ...this.fetchOpts },
+      { timeoutMs: 60_000, retries: 3, retryDelayMs: 5_000, fetchImpl: publicFetch, ...this.fetchOpts },
     );
     return (await res.json()) as T;
   }
@@ -167,7 +170,7 @@ export class WordPressAdapter implements CmsAdapter {
         // Uint8Array é body válido no fetch do Node
         body: input.data as unknown as RequestInit['body'],
       },
-      { timeoutMs: 60_000, retries: 2, retryDelayMs: 3_000, ...this.fetchOpts },
+      { timeoutMs: 60_000, retries: 2, retryDelayMs: 3_000, fetchImpl: publicFetch, ...this.fetchOpts },
     );
     const media = (await res.json()) as { id: number; source_url: string };
     if (input.alt || input.caption) {

@@ -13,14 +13,15 @@ export class HttpError extends Error {
 
 export interface FetchRetryOptions {
   timeoutMs?: number;
+  /** Tentativas no total, não tentativas adicionais. */
   retries?: number;
   retryDelayMs?: number;
-  /** Não faz retry nesses status (padrão: 4xx exceto 408/429). */
   fetchImpl?: typeof fetch;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** 5xx, 408 e 429 podem mudar de resposta; o resto dos 4xx não. */
 function isRetryableStatus(status: number): boolean {
   if (status === 408 || status === 429) return true;
   return status >= 500;
@@ -39,18 +40,15 @@ export async function fetchWithRetry(
       const res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
       if (res.ok) return res;
       const body = await res.text().catch(() => '');
-      const err = new HttpError(`HTTP ${res.status} em ${url}`, res.status, body.slice(0, 2000));
-      if (!isRetryableStatus(res.status) || attempt === retries) throw err;
-      lastError = err;
+      throw new HttpError(`HTTP ${res.status} em ${url}`, res.status, body.slice(0, 2000));
     } catch (err) {
-      if (err instanceof HttpError) {
-        if (attempt === retries) throw err;
-        lastError = err;
-      } else {
-        // erro de rede/timeout
-        if (attempt === retries) throw err;
-        lastError = err;
-      }
+      lastError = err;
+      // A decisão de repetir fica AQUI, e não junto do `throw` acima: lançar
+      // dentro do try cai neste mesmo catch, então um 4xx definitivo seria
+      // repetido do mesmo jeito. Erro de rede e timeout não são HttpError e
+      // continuam valendo nova tentativa.
+      const definitive = err instanceof HttpError && !isRetryableStatus(err.status);
+      if (definitive || attempt === retries) throw err;
     }
     await sleep(retryDelayMs);
   }

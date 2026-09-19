@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { UserFacingError } from './errors';
+import { consumeRateLimit } from './rate-limit';
 import { z } from 'zod';
 import { requireSession, type SessionInfo } from '@/lib/auth';
 
@@ -32,6 +35,9 @@ export async function runAuthedAction<S extends z.ZodType, T>(
     return { ok: false, error: 'Sessão expirada — faça login novamente.' };
   }
 
+  if (session.workspaceStatus !== 'active') return { ok: false, error: 'Workspace suspenso. Apenas leitura disponível.' };
+  if (!await consumeRateLimit('tenant:actor', session.userId)) return { ok: false, error: 'Muitas ações. Aguarde um minuto.' };
+
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     const flat = z.flattenError(parsed.error);
@@ -46,7 +52,9 @@ export async function runAuthedAction<S extends z.ZodType, T>(
     const data = await handler(parsed.data, session);
     return { ok: true, data };
   } catch (err) {
-    console.error('[action]', err);
-    return { ok: false, error: err instanceof Error ? err.message : 'Erro inesperado.' };
+    if (err instanceof UserFacingError) return { ok: false, error: err.message, code: err.code };
+    const ref = randomUUID();
+    console.error('[action]', ref, err instanceof Error ? err.name : 'UnknownError');
+    return { ok: false, error: `Não foi possível concluir a ação (ref. ${ref}).` };
   }
 }

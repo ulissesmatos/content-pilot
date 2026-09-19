@@ -1,6 +1,7 @@
+import { UserFacingError } from '@/lib/errors';
 import 'server-only';
 import { and, eq, isNull, or } from 'drizzle-orm';
-import { contentTemplates, getDb } from '@content-pilot/db';
+import { contentTemplates, getTenantDb } from '@content-pilot/db';
 
 /**
  * Guardas de isolamento multi-tenant compartilhadas pelas actions.
@@ -10,7 +11,7 @@ import { contentTemplates, getDb } from '@content-pilot/db';
 
 /** Template do workspace ou builtin — nunca de outro tenant. */
 export async function assertTemplateAccessible(templateId: string, workspaceId: string): Promise<void> {
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [tpl] = await db
     .select({ id: contentTemplates.id })
     .from(contentTemplates)
@@ -21,5 +22,5 @@ export async function assertTemplateAccessible(templateId: string, workspaceId: 
       ),
     )
     .limit(1);
-  if (!tpl) throw new Error('Template não encontrado.');
+  if (!tpl) throw new UserFacingError('Template não encontrado.');
 }

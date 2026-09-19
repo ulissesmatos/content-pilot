@@ -13,6 +13,7 @@ export * from './run-logs';
 export * from './llm-calls';
 export * from './subscriptions';
 export * from './audit-logs';
+export * from './auth-tokens';
 export * from './platform-settings';
 export * from './model-catalog';
 export * from './model-profiles';

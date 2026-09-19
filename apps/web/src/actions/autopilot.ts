@@ -1,7 +1,8 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
-import { and, autopilotConfigs, briefs, discoveredTopics, eq, getDb, runs, sites } from '@content-pilot/db';
+import { and, autopilotConfigs, briefs, discoveredTopics, eq, getTenantDb, runs, sites } from '@content-pilot/db';
 import {
   autopilotDiscoverySchema,
   autopilotLimitsSchema,
@@ -43,7 +44,7 @@ function parseSeedTopics(raw: string): string[] {
 
 export async function createAutopilotAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(createAutopilotSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
 
     // limite de autopilots do plano (Fase 5)
     const plan = await getWorkspacePlan(workspaceId);
@@ -52,7 +53,7 @@ export async function createAutopilotAction(input: unknown): Promise<ActionResul
       .from(autopilotConfigs)
       .where(eq(autopilotConfigs.workspaceId, workspaceId));
     if (existing.length >= plan.limits.maxAutopilots) {
-      throw new Error(
+      throw new UserFacingError(
         `Seu plano permite ${plan.limits.maxAutopilots} autopilot(s). Faça upgrade em Plano e cobrança para criar mais.`,
       );
     }
@@ -62,17 +63,17 @@ export async function createAutopilotAction(input: unknown): Promise<ActionResul
       .from(sites)
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
-    if (!site) throw new Error('Site não encontrado.');
+    if (!site) throw new UserFacingError('Site não encontrado.');
     await assertTemplateAccessible(data.templateId, workspaceId);
 
     const seedTopics = parseSeedTopics(data.seedTopics);
-    if (seedTopics.length === 0) throw new Error('Informe ao menos um tema-semente.');
+    if (seedTopics.length === 0) throw new UserFacingError('Informe ao menos um tema-semente.');
 
     let nextRunAt: Date;
     try {
       nextRunAt = computeNextRunAt(data.scheduleCron, data.timezone);
     } catch {
-      throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
+      throw new UserFacingError(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
     // O modelo vem do perfil do admin (model_profiles); a config guarda só
@@ -114,30 +115,30 @@ const updateAutopilotSchema = createAutopilotSchema.extend({ id: z.string().uuid
 
 export async function updateAutopilotAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(updateAutopilotSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [cfg] = await db
       .select()
       .from(autopilotConfigs)
       .where(and(eq(autopilotConfigs.id, data.id), eq(autopilotConfigs.workspaceId, workspaceId)))
       .limit(1);
-    if (!cfg) throw new Error('Autopilot não encontrado.');
+    if (!cfg) throw new UserFacingError('Autopilot não encontrado.');
 
     const [site] = await db
       .select({ id: sites.id })
       .from(sites)
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
-    if (!site) throw new Error('Site não encontrado.');
+    if (!site) throw new UserFacingError('Site não encontrado.');
     await assertTemplateAccessible(data.templateId, workspaceId);
 
     const seedTopics = parseSeedTopics(data.seedTopics);
-    if (seedTopics.length === 0) throw new Error('Informe ao menos um tema-semente.');
+    if (seedTopics.length === 0) throw new UserFacingError('Informe ao menos um tema-semente.');
 
     let nextRunAt: Date;
     try {
       nextRunAt = computeNextRunAt(data.scheduleCron, data.timezone);
     } catch {
-      throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
+      throw new UserFacingError(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
     // O modelo vem do perfil do admin (model_profiles); a config guarda só
@@ -180,13 +181,13 @@ const toggleSchema = z.object({ id: z.string().uuid(), enabled: z.boolean() });
 
 export async function toggleAutopilotAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(toggleSchema, input, async ({ id, enabled }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [cfg] = await db
       .select()
       .from(autopilotConfigs)
       .where(and(eq(autopilotConfigs.id, id), eq(autopilotConfigs.workspaceId, workspaceId)))
       .limit(1);
-    if (!cfg) throw new Error('Autopilot não encontrado.');
+    if (!cfg) throw new UserFacingError('Autopilot não encontrado.');
 
     await db
       .update(autopilotConfigs)
@@ -203,14 +204,14 @@ export async function toggleAutopilotAction(input: unknown): Promise<ActionResul
 
 export async function deleteAutopilotAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     // Não excluir com descoberta/geração em andamento atribuída a esta config.
     const [running] = await db
       .select({ id: runs.id })
       .from(runs)
       .where(and(eq(runs.autopilotConfigId, id), eq(runs.workspaceId, workspaceId), eq(runs.status, 'running')))
       .limit(1);
-    if (running) throw new Error('Este autopilot tem uma execução em andamento — pare a execução antes de excluir.');
+    if (running) throw new UserFacingError('Este autopilot tem uma execução em andamento — pare a execução antes de excluir.');
 
     // Histórico de runs preservado (autopilot_config_id vira NULL); o feed de temas cai junto
     // (cascade); as pautas criadas permanecem em /briefs.
@@ -229,24 +230,24 @@ export async function deleteAutopilotAction(input: unknown): Promise<ActionResul
  */
 export async function generateTopicNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [topic] = await db
       .select()
       .from(discoveredTopics)
       .where(and(eq(discoveredTopics.id, id), eq(discoveredTopics.workspaceId, workspaceId)))
       .limit(1);
-    if (!topic) throw new Error('Tema não encontrado.');
-    if (topic.status !== 'pending') throw new Error('Só temas pendentes podem ser gerados por aqui.');
-    if (!topic.briefId) throw new Error('Tema sem pauta associada — crie uma pauta manualmente em Criar posts.');
+    if (!topic) throw new UserFacingError('Tema não encontrado.');
+    if (topic.status !== 'pending') throw new UserFacingError('Só temas pendentes podem ser gerados por aqui.');
+    if (!topic.briefId) throw new UserFacingError('Tema sem pauta associada — crie uma pauta manualmente em Criar posts.');
 
     const [brief] = await db
       .select({ id: briefs.id, status: briefs.status })
       .from(briefs)
       .where(and(eq(briefs.id, topic.briefId), eq(briefs.workspaceId, workspaceId)))
       .limit(1);
-    if (!brief) throw new Error('A pauta deste tema foi excluída — crie uma nova em Criar posts.');
+    if (!brief) throw new UserFacingError('A pauta deste tema foi excluída — crie uma nova em Criar posts.');
     if (brief.status !== 'pending' && brief.status !== 'failed') {
-      throw new Error('A pauta deste tema já está em andamento ou concluída — veja em Criar posts.');
+      throw new UserFacingError('A pauta deste tema já está em andamento ou concluída — veja em Criar posts.');
     }
 
     await db
@@ -277,7 +278,7 @@ export async function generateTopicNowAction(input: unknown): Promise<ActionResu
         .update(runs)
         .set({ status: 'cancelled', finishedAt: new Date(), error: 'geração anterior ainda em andamento' })
         .where(eq(runs.id, run!.id));
-      throw new Error('Esta pauta já está sendo gerada.');
+      throw new UserFacingError('Esta pauta já está sendo gerada.');
     }
 
     await db.update(discoveredTopics).set({ status: 'queued' }).where(eq(discoveredTopics.id, id));
@@ -295,14 +296,14 @@ export async function generateTopicNowAction(input: unknown): Promise<ActionResu
  */
 export async function dismissTopicAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [topic] = await db
       .select()
       .from(discoveredTopics)
       .where(and(eq(discoveredTopics.id, id), eq(discoveredTopics.workspaceId, workspaceId)))
       .limit(1);
-    if (!topic) throw new Error('Tema não encontrado.');
-    if (topic.status !== 'pending') throw new Error('Só temas pendentes podem ser descartados.');
+    if (!topic) throw new UserFacingError('Tema não encontrado.');
+    if (topic.status !== 'pending') throw new UserFacingError('Só temas pendentes podem ser descartados.');
 
     if (topic.briefId) {
       const [brief] = await db
@@ -329,13 +330,13 @@ export async function dismissTopicAction(input: unknown): Promise<ActionResult> 
 
 export async function runAutopilotNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [cfg] = await db
       .select({ id: autopilotConfigs.id })
       .from(autopilotConfigs)
       .where(and(eq(autopilotConfigs.id, id), eq(autopilotConfigs.workspaceId, workspaceId)))
       .limit(1);
-    if (!cfg) throw new Error('Autopilot não encontrado.');
+    if (!cfg) throw new UserFacingError('Autopilot não encontrado.');
 
     const [run] = await db
       .insert(runs)
@@ -353,7 +354,7 @@ export async function runAutopilotNowAction(input: unknown): Promise<ActionResul
         .update(runs)
         .set({ status: 'cancelled', finishedAt: new Date(), error: 'descoberta anterior ainda em andamento' })
         .where(eq(runs.id, run!.id));
-      throw new Error('Já existe uma descoberta deste autopilot em andamento.');
+      throw new UserFacingError('Já existe uma descoberta deste autopilot em andamento.');
     }
 
     revalidatePath('/runs');

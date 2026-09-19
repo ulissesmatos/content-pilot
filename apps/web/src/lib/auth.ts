@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import { compare } from 'bcryptjs';
@@ -5,13 +6,13 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, users, workspaces } from '@content-pilot/db';
 import { z } from 'zod';
 import { authConfig } from './auth.config';
-import { checkLoginRateLimit, registerLoginFailure, registerLoginSuccess } from './rate-limit';
+import { checkLoginRateLimit } from './rate-limit';
 import { isSuperAdmin } from './super-admin';
 import { clientIp } from './request-context';
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().trim().email().max(200),
+  password: z.string().min(1).max(200),
 });
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -30,7 +31,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ip = await clientIp().catch(() => null);
 
         // Anti brute-force: bloqueia por conta e por origem.
-        if (!checkLoginRateLimit(email, ip)) return null;
+        if (!await checkLoginRateLimit(email, ip)) return null;
 
         const db = getDb();
         const [user] = await db
@@ -39,13 +40,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .where(and(eq(users.email, email), isNull(users.deletedAt)))
           .limit(1);
         if (!user) {
-          registerLoginFailure(email, ip);
           return null;
         }
 
         const valid = await compare(parsed.data.password, user.passwordHash);
         if (!valid) {
-          registerLoginFailure(email, ip);
           return null;
         }
 
@@ -53,11 +52,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // passa mesmo assim — é a única porta de volta se o status for
         // alterado à mão no banco.
         if (!isSuperAdmin(user.email) && user.status !== 'active') {
-          registerLoginFailure(email, ip);
           return null;
         }
 
-        registerLoginSuccess(email);
         await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
         invalidateUserCache(user.id);
 
@@ -76,13 +73,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 /**
  * O JWT do next-auth não revalida sozinho: sem isto, um usuário banido (ou um
  * admin rebaixado) continuaria com sessão válida até o token expirar. Toda
- * request relê o essencial do banco, com cache curto para não pagar uma ida
- * ao banco por render.
+ * request relê o essencial do banco; o cache é limitado à própria request.
  *
  * Consequência: o `role` do JWT vale como dica de UX para o middleware; o
  * `role` do banco é a verdade de autorização.
  */
-const FRESHNESS_TTL_MS = 60_000;
+
 
 interface FreshUser {
   id: string;
@@ -92,14 +88,13 @@ interface FreshUser {
   status: 'active' | 'suspended' | 'banned';
   deleted: boolean;
   workspaceStatus: 'active' | 'suspended';
+  emailVerified: boolean;
+  /** Sessões emitidas antes disto não valem mais (troca de senha). */
+  sessionsValidFrom: Date | null;
 }
 
-const freshCache = new Map<string, { at: number; value: FreshUser | null }>();
-
-/** Chamar após mudar cargo/status/e-mail de um usuário para valer na hora. */
-export function invalidateUserCache(userId: string): void {
-  freshCache.delete(userId);
-}
+/** Kept for admin callers; authorization no longer uses a process-wide cache. */
+export function invalidateUserCache(userId: string): void { void userId; }
 
 async function loadFreshUser(userId: string): Promise<FreshUser | null> {
   const db = getDb();
@@ -111,6 +106,8 @@ async function loadFreshUser(userId: string): Promise<FreshUser | null> {
       role: users.role,
       status: users.status,
       deletedAt: users.deletedAt,
+      emailVerifiedAt: users.emailVerifiedAt,
+      sessionsValidFrom: users.sessionsValidFrom,
       workspaceStatus: workspaces.status,
     })
     .from(users)
@@ -127,16 +124,13 @@ async function loadFreshUser(userId: string): Promise<FreshUser | null> {
     status: row.status,
     deleted: row.deletedAt !== null,
     workspaceStatus: row.workspaceStatus,
+    emailVerified: row.emailVerifiedAt !== null,
+    sessionsValidFrom: row.sessionsValidFrom,
   };
 }
 
-async function getFreshUser(userId: string): Promise<FreshUser | null> {
-  const cached = freshCache.get(userId);
-  if (cached && Date.now() - cached.at < FRESHNESS_TTL_MS) return cached.value;
-  const value = await loadFreshUser(userId);
-  freshCache.set(userId, { at: Date.now(), value });
-  return value;
-}
+// React cache is request-scoped; suspension/revocation applies on the next request.
+const getFreshUser = cache(loadFreshUser);
 
 /**
  * Conta autenticada porém bloqueada (suspensa/banida/excluída). Separada do
@@ -158,6 +152,7 @@ export interface SessionInfo {
   role: 'owner' | 'admin';
   isSuperAdmin: boolean;
   workspaceStatus: 'active' | 'suspended';
+  emailVerified: boolean;
 }
 
 /** Sessão obrigatória: lança se não autenticado (uso em server actions/RSC). */
@@ -168,6 +163,14 @@ export async function requireSession(): Promise<SessionInfo> {
 
   const fresh = await getFreshUser(userId);
   if (!fresh) throw new Error('Não autenticado');
+
+  // Sessão anterior à última troca de senha não vale mais. Um token antigo
+  // sem `loginAt` (emitido antes desta versão) é tratado como anterior a
+  // tudo: na dúvida, manda fazer login de novo.
+  if (fresh.sessionsValidFrom) {
+    const loginAt = (session?.user as { loginAt?: number } | undefined)?.loginAt ?? 0;
+    if (loginAt < fresh.sessionsValidFrom.getTime()) throw new Error('Não autenticado');
+  }
 
   const superAdmin = isSuperAdmin(fresh.email);
   if (!superAdmin && (fresh.deleted || fresh.status !== 'active')) {
@@ -181,6 +184,7 @@ export async function requireSession(): Promise<SessionInfo> {
     role: fresh.role,
     isSuperAdmin: superAdmin,
     workspaceStatus: fresh.workspaceStatus,
+    emailVerified: fresh.emailVerified,
   };
 }
 

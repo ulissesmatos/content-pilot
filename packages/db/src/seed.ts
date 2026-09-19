@@ -81,15 +81,10 @@ async function main() {
     throw new Error('Defina ADMIN_EMAIL e ADMIN_PASSWORD no .env antes de rodar o seed.');
   }
 
-  let [workspace] = await db.select().from(workspaces).limit(1);
-  if (!workspace) {
-    [workspace] = await db.insert(workspaces).values({ name: 'Default' }).returning();
-    console.log(`Workspace criado: ${workspace!.id}`);
-  }
-
   const [existingUser] = await db.select().from(users).where(eq(users.email, adminEmail)).limit(1);
   let adminWorkspaceId: string;
   if (!existingUser) {
+    const [workspace] = await db.insert(workspaces).values({ name: 'Admin' }).returning();
     const passwordHash = await hash(adminPassword, 12);
     await db.insert(users).values({
       workspaceId: workspace!.id,

@@ -94,7 +94,7 @@ export async function runAdminAction<S extends z.ZodType, T>(
     };
   }
 
-  if (!consumeRateLimit('admin:actor', session.userId)) {
+  if (!await consumeRateLimit('admin:actor', session.userId)) {
     return {
       ok: false,
       error: 'Muitas ações em pouco tempo. Aguarde um instante.',

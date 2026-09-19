@@ -1,28 +1,32 @@
 /**
  * Planos do produto SaaS (Fase 5). Os limites vivem AQUI (código), não no
  * banco — o banco (`subscriptions`) guarda só qual plano o workspace tem.
- * `unlimited` é interno (admins da plataforma), nunca comprável.
+ * `unlimited` representa isenção de cotas, nunca acesso a chaves do sistema.
  *
  * BYOK (bring your own key) = o workspace pode cadastrar chaves próprias de
- * IA/busca. Sem BYOK, o workspace usa as chaves da plataforma (credenciais
- * globais com workspace NULL) e os limites de tokens protegem o custo.
+ * IA/busca em qualquer plano. Chaves do sistema são exclusivas do proprietário
+ * da instalação (ADMIN_EMAIL); essa autorização não é um recurso de plano.
+ *
+ * Os limites se dividem em dois grupos, e a diferença importa:
+ *  - CONSUMO (postsPerMonth, tokensPerMonth) mede o que a plataforma financia.
+ *    Some para quem traz a própria chave — ver `withByokConsumption`.
+ *  - ESTRUTURAL (maxSites, maxAutopilots) mede o que roda no nosso worker.
+ *    Vale para todo mundo, BYOK ou não.
  */
 
 export type PlanId = 'free' | 'starter' | 'pro' | 'unlimited';
 
 export interface PlanLimits {
-  /** Posts novos criados por mês (geração de pautas, manual ou autopilot). */
+  /** CONSUMO: posts novos criados por mês (manual ou autopilot). */
   postsPerMonth: number;
-  /** Tokens LLM (entrada+saída) por mês, somando todas as chamadas. */
+  /** CONSUMO: tokens LLM (entrada+saída) por mês, somando todas as chamadas. */
   tokensPerMonth: number;
-  /** Sites WordPress conectados. */
+  /** ESTRUTURAL: sites WordPress conectados. */
   maxSites: number;
-  /** Configurações de Autopilot ativas. */
+  /** ESTRUTURAL: configurações de Autopilot ativas. */
   maxAutopilots: number;
   /** Pode cadastrar chaves próprias de IA/busca (BYOK). */
   byokAllowed: boolean;
-  /** Pode usar as chaves globais da plataforma como fallback. */
-  platformKeysAllowed: boolean;
 }
 
 export interface PlanDef {
@@ -46,8 +50,7 @@ export const PLANS: Record<PlanId, PlanDef> = {
       tokensPerMonth: 1 * M,
       maxSites: 1,
       maxAutopilots: 1,
-      byokAllowed: false,
-      platformKeysAllowed: true,
+      byokAllowed: true,
     },
   },
   starter: {
@@ -59,8 +62,7 @@ export const PLANS: Record<PlanId, PlanDef> = {
       tokensPerMonth: 6 * M,
       maxSites: 2,
       maxAutopilots: 2,
-      byokAllowed: false,
-      platformKeysAllowed: true,
+      byokAllowed: true,
     },
   },
   pro: {
@@ -73,7 +75,6 @@ export const PLANS: Record<PlanId, PlanDef> = {
       maxSites: 5,
       maxAutopilots: 5,
       byokAllowed: true,
-      platformKeysAllowed: true,
     },
   },
   unlimited: {
@@ -86,7 +87,6 @@ export const PLANS: Record<PlanId, PlanDef> = {
       maxSites: Number.MAX_SAFE_INTEGER,
       maxAutopilots: Number.MAX_SAFE_INTEGER,
       byokAllowed: true,
-      platformKeysAllowed: true,
     },
   },
 };
@@ -102,6 +102,25 @@ export function effectivePlan(sub: { plan: string; status: string } | null | und
   if (!sub) return PLANS.free;
   if (!ACTIVE_STATUSES.has(sub.status)) return PLANS.free;
   return planById(sub.plan);
+}
+
+/**
+ * Remove as cotas de consumo de quem paga a própria IA.
+ *
+ * Aplicado só nos guards de geração — `maxSites`/`maxAutopilots` continuam
+ * vindo do plano cru, inclusive para BYOK, porque limitam o nosso servidor e
+ * não a conta do provedor do usuário.
+ */
+export function withByokConsumption(plan: PlanDef, byok: boolean): PlanDef {
+  if (!byok) return plan;
+  return {
+    ...plan,
+    limits: {
+      ...plan.limits,
+      postsPerMonth: Number.MAX_SAFE_INTEGER,
+      tokensPerMonth: Number.MAX_SAFE_INTEGER,
+    },
+  };
 }
 
 export class PlanLimitError extends Error {

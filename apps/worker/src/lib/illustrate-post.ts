@@ -1,3 +1,4 @@
+import { publicFetch } from '@content-pilot/core';
 import {
   combineImageClients,
   illustrate,
@@ -119,11 +120,31 @@ async function uploadImage(
 
 async function downloadImage(url: string): Promise<{ data: Uint8Array; mimeType: string } | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    const res = await publicFetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) return null;
     const mimeType = (res.headers.get('content-type') ?? 'image/jpeg').split(';')[0]!.trim();
-    if (!mimeType.startsWith('image/')) return null;
-    const data = new Uint8Array(await res.arrayBuffer());
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType)) {
+      await res.body?.cancel();
+      return null;
+    }
+    if (Number(res.headers.get('content-length')) > 8_000_000) {
+      await res.body?.cancel();
+      return null;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 8_000_000) { await reader.cancel(); return null; }
+      chunks.push(value);
+    }
+    const data = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength; }
     // sanidade: 5KB..8MB (evita ícones minúsculos e arquivos gigantes — capa precisa de resolução)
     if (data.byteLength < 5_000 || data.byteLength > 8_000_000) return null;
     return { data, mimeType };

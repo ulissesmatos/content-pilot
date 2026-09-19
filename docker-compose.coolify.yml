@@ -1,0 +1,87 @@
+# Coolify — recurso do tipo "Docker Compose" apontando para este arquivo.
+#
+# Diferenças para o docker-compose.prod.yml:
+#  - sem Caddy e sem portas publicadas: o proxy do próprio Coolify termina o
+#    TLS e roteia. Subir o Caddy aqui brigaria pelas portas 80/443 do host.
+#  - `expose: 3000` é o que faz o Coolify oferecer o campo de domínio do `web`.
+#  - as variáveis vêm do editor de ambiente do Coolify, não de um .env no disco.
+#
+# Nenhum `${VAR:?...}` de propósito: o Coolify lê este arquivo antes de existir
+# valor algum e um erro de substituição quebraria a importação do stack.
+# Os obrigatórios estão no runbook, seção "Deploy no Coolify".
+x-app-env: &app-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-contentpilot}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-contentpilot}
+  AUTH_SECRET: ${AUTH_SECRET}
+  # URL pública exata, com https e sem barra final — precisa bater com o
+  # domínio configurado no serviço `web`, senão o cookie de sessão não fecha.
+  AUTH_URL: ${AUTH_URL}
+  # Obrigatório atrás de proxy: sem isto o Auth.js recusa o host encaminhado.
+  AUTH_TRUST_HOST: "true"
+  ADMIN_EMAIL: ${ADMIN_EMAIL}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+  VAULT_MASTER_KEYS: ${VAULT_MASTER_KEYS}
+  VAULT_ACTIVE_KEY_ID: ${VAULT_ACTIVE_KEY_ID:-k1}
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+  # Vazios = recuperação de senha inativa. Podem ser definidos em /admin/settings.
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  BILLING_ENABLED: ${BILLING_ENABLED:-false}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-contentpilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-contentpilot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-contentpilot} -d ${POSTGRES_DB:-contentpilot}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Roda uma vez por deploy e sai com 0. Ver o container como "exited" no
+  # Coolify é o esperado — migrations e seed são idempotentes.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      target: web
+    environment: *app-env
+    expose:
+      - "3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:

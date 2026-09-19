@@ -1,7 +1,8 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
-import { and, contentJobs, contentTemplates, eq, getDb, isNull, or } from '@content-pilot/db';
+import { and, contentJobs, contentTemplates, eq, getTenantDb, isNull, or } from '@content-pilot/db';
 import { parseTemplateConfig } from '@content-pilot/core';
 import { z } from 'zod';
 import { isFkViolation, runAuthedAction, type ActionResult } from '@/lib/action-utils';
@@ -17,7 +18,7 @@ const cloneTemplateSchema = z.object({
 /** Clona um template (builtin ou próprio) para o workspace, liberando edição. */
 export async function cloneTemplateAction(input: unknown): Promise<ActionResult<{ id: string; name: string }>> {
   return runAuthedAction(cloneTemplateSchema, input, async ({ id, name }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [source] = await db
       .select()
       .from(contentTemplates)
@@ -28,7 +29,7 @@ export async function cloneTemplateAction(input: unknown): Promise<ActionResult<
         ),
       )
       .limit(1);
-    if (!source) throw new Error('Template não encontrado.');
+    if (!source) throw new UserFacingError('Template não encontrado.');
 
     // slug único no workspace: acrescenta sufixo incremental
     const baseSlug = `${source.slug}-copia`;
@@ -69,20 +70,20 @@ const updateTemplateSchema = z.object({
 
 export async function updateTemplateAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(updateTemplateSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [existing] = await db
       .select({ id: contentTemplates.id, isBuiltin: contentTemplates.isBuiltin, version: contentTemplates.version })
       .from(contentTemplates)
       .where(and(eq(contentTemplates.id, data.id), eq(contentTemplates.workspaceId, workspaceId)))
       .limit(1);
-    if (!existing) throw new Error('Template não encontrado.');
-    if (existing.isBuiltin) throw new Error('Templates builtin são somente leitura — clone para editar.');
+    if (!existing) throw new UserFacingError('Template não encontrado.');
+    if (existing.isBuiltin) throw new UserFacingError('Templates builtin são somente leitura — clone para editar.');
 
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(data.configJson);
     } catch (err) {
-      throw new Error(`JSON inválido: ${err instanceof Error ? err.message : 'erro de sintaxe'}`);
+      throw new UserFacingError(`JSON inválido: ${err instanceof Error ? err.message : 'erro de sintaxe'}`);
     }
 
     let config;
@@ -90,7 +91,7 @@ export async function updateTemplateAction(input: unknown): Promise<ActionResult
       config = parseTemplateConfig(parsedJson);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Config não passou na validação: ${msg.slice(0, 800)}`);
+      throw new UserFacingError(`Config não passou na validação: ${msg.slice(0, 800)}`);
     }
 
     await db
@@ -112,14 +113,14 @@ export async function updateTemplateAction(input: unknown): Promise<ActionResult
 
 export async function deleteTemplateAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [jobUsing] = await db
       .select({ id: contentJobs.id, name: contentJobs.name })
       .from(contentJobs)
       .where(and(eq(contentJobs.templateId, id), eq(contentJobs.workspaceId, workspaceId)))
       .limit(1);
     if (jobUsing) {
-      throw new Error(`Template em uso pelo job "${jobUsing.name}" — troque o template do job antes de excluir.`);
+      throw new UserFacingError(`Template em uso pelo job "${jobUsing.name}" — troque o template do job antes de excluir.`);
     }
 
     let deleted;
@@ -136,11 +137,11 @@ export async function deleteTemplateAction(input: unknown): Promise<ActionResult
         .returning({ id: contentTemplates.id });
     } catch (err) {
       if (isFkViolation(err)) {
-        throw new Error('Template em uso por pautas ou autopilots — troque o template deles antes de excluir.');
+        throw new UserFacingError('Template em uso por pautas ou autopilots — troque o template deles antes de excluir.');
       }
       throw err;
     }
-    if (!deleted) throw new Error('Template não encontrado ou é builtin (somente leitura).');
+    if (!deleted) throw new UserFacingError('Template não encontrado ou é builtin (somente leitura).');
 
     revalidatePath('/templates');
     return null;

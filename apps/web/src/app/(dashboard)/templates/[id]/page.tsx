@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { and, eq, isNull, or } from 'drizzle-orm';
-import { contentTemplates, getDb } from '@content-pilot/db';
+import { contentTemplates, getTenantDb } from '@content-pilot/db';
 import { PageHeader } from '@/components/page-header';
 import { TemplateEditor } from '@/components/templates/template-editor';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,7 @@ export default async function TemplateEditorPage({ params }: { params: Promise<{
   const { id } = await params;
   const { workspaceId } = await requireSession();
 
-  const [template] = await getDb()
+  const [template] = await getTenantDb(workspaceId)
     .select()
     .from(contentTemplates)
     .where(

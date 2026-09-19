@@ -1,12 +1,12 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
-import { credentials, getDb, sites } from '@content-pilot/db';
+import { credentials, getTenantDb, sites } from '@content-pilot/db';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
-import { getWorkspacePlan } from '@/lib/billing';
 import { encryptSecret } from '@/lib/vault';
 
 const createCredentialSchema = z
@@ -27,18 +27,10 @@ const createCredentialSchema = z
   });
 
 export async function createCredentialAction(input: unknown): Promise<ActionResult<{ id: string }>> {
-  return runAuthedAction(createCredentialSchema, input, async (data, { workspaceId, role }) => {
+  return runAuthedAction(createCredentialSchema, input, async (data, { workspaceId }) => {
     // Credencial da PLATAFORMA não se cria por aqui: ela vive em /admin/ai/keys,
     // onde a ação é auditada e restrita ao super admin.
-    if (data.type !== 'wordpress' && role !== 'admin') {
-      // BYOK é recurso de plano: sem ele, o workspace usa as chaves da plataforma.
-      const plan = await getWorkspacePlan(workspaceId);
-      if (!plan.limits.byokAllowed) {
-        throw new Error(
-          'Seu plano usa as chaves de IA da plataforma — não precisa configurar nada. Chave própria (BYOK) está disponível no plano Pro.',
-        );
-      }
-    }
+    // BYOK está disponível para todos, independentemente de plano ou cargo.
 
     const id = randomUUID();
     const payload =
@@ -49,7 +41,7 @@ export async function createCredentialAction(input: unknown): Promise<ActionResu
     const maskedHint = `••••${secretForHint.trim().slice(-4)}`;
 
     const { ciphertext, keyId } = encryptSecret(payload, workspaceId, id);
-    await getDb().insert(credentials).values({
+    await getTenantDb(workspaceId).insert(credentials).values({
       id,
       workspaceId,
       type: data.type,
@@ -68,17 +60,17 @@ const deleteSchema = z.object({ id: z.string().uuid() });
 
 export async function deleteCredentialAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(deleteSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [cred] = await db
       .select({ id: credentials.id, workspaceId: credentials.workspaceId })
       .from(credentials)
       .where(eq(credentials.id, id))
       .limit(1);
-    if (!cred) throw new Error('Credencial não encontrada.');
+    if (!cred) throw new UserFacingError('Credencial não encontrada.');
 
     // Plataforma e outro tenant compartilham a mensagem: nada aqui deve revelar
     // que a linha existe. Chave de plataforma se gerencia em /admin/ai/keys.
-    if (cred.workspaceId !== workspaceId) throw new Error('Credencial não encontrada.');
+    if (cred.workspaceId !== workspaceId) throw new UserFacingError('Credencial não encontrada.');
 
     const [siteUsing] = await db
       .select({ id: sites.id, name: sites.name })
@@ -86,7 +78,7 @@ export async function deleteCredentialAction(input: unknown): Promise<ActionResu
       .where(and(eq(sites.credentialId, id), eq(sites.workspaceId, workspaceId)))
       .limit(1);
     if (siteUsing) {
-      throw new Error(`Credencial em uso pelo site "${siteUsing.name}" — remova ou troque a credencial do site antes.`);
+      throw new UserFacingError(`Credencial em uso pelo site "${siteUsing.name}" — remova ou troque a credencial do site antes.`);
     }
 
     await db.delete(credentials).where(and(eq(credentials.id, id), eq(credentials.workspaceId, workspaceId)));

@@ -38,6 +38,20 @@ export const users = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: uuid('deleted_by').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    /**
+     * Confirmação de e-mail. É informativa, não um portão: a conta funciona
+     * sem confirmar. Serve para saber se a recuperação de senha tem para onde
+     * ir antes de o usuário precisar dela.
+     */
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    /**
+     * Sessões emitidas ANTES deste instante não valem mais.
+     *
+     * O next-auth usa JWT: não há tabela de sessões para apagar. Sem este
+     * carimbo, trocar a senha deixaria a sessão de quem roubou a conta viva
+     * até o token expirar — exatamente a sessão que a troca queria derrubar.
+     */
+    sessionsValidFrom: timestamp('sessions_valid_from', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -13,6 +13,7 @@ import { z } from 'zod';
 
 export const SETTINGS_KEYS = {
   stripe: 'stripe',
+  email: 'email',
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -27,3 +28,17 @@ export const stripeSettingsSchema = z.object({
 export type StripeSettings = z.infer<typeof stripeSettingsSchema>;
 
 export const STRIPE_SETTINGS_DEFAULT: StripeSettings = stripeSettingsSchema.parse({});
+
+export const emailSettingsSchema = z.object({
+  /**
+   * Remetente dos e-mails transacionais, em `Nome <conta@dominio>` ou só o
+   * endereço. O domínio precisa estar verificado no Resend — sem isso a API
+   * aceita a chave e recusa o envio.
+   */
+  fromAddress: z.string().max(200).nullable().default(null),
+  /** Para onde vai a resposta do usuário. Nulo = mesma caixa do remetente. */
+  replyTo: z.string().max(200).nullable().default(null),
+});
+export type EmailSettings = z.infer<typeof emailSettingsSchema>;
+
+export const EMAIL_SETTINGS_DEFAULT: EmailSettings = emailSettingsSchema.parse({});

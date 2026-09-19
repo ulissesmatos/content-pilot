@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { RefreshCw } from 'lucide-react';
-import { contentJobs, contentTemplates, credentials, getDb, sites } from '@content-pilot/db';
+import { contentJobs, contentTemplates, credentials, getTenantDb, sites } from '@content-pilot/db';
 import { jobLimitsSchema, postFilterSchema } from '@content-pilot/core';
 import { CreateJobDialog, EditJobButton, type JobFormInitial } from '@/components/jobs/create-job-dialog';
 import { DeleteJobButton, JobEnabledSwitch, RunNowButton } from '@/components/jobs/job-row-actions';
@@ -15,7 +15,7 @@ export const metadata = { title: 'Atualizar posts' };
 
 export default async function JobsPage() {
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('jobs'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 

@@ -9,7 +9,7 @@ services:
       POSTGRES_DB: contentpilot
     ports:
       # 5433 no host: a máquina de dev tem um PostgreSQL nativo ocupando a 5432
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

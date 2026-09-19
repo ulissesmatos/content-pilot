@@ -1,3 +1,4 @@
+import { assertWorkerWorkspace } from '../lib/tenant';
 import { contentJobs, eq, runs, sites, type Db } from '@content-pilot/db';
 import { PlanLimitError, postFilterSchema, jobLimitsSchema } from '@content-pilot/core';
 import type { PgBoss } from 'pg-boss';
@@ -14,7 +15,7 @@ export async function handleJobRun(db: Db, boss: PgBoss, payload: JobRunPayload)
   const { jobId, runId } = payload;
 
   // Run cancelado antes de começar → aborta
-  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run || run.status !== 'running') {
     console.log(`[job.run] run ${runId} não está em execução — abortando`);
     return;
@@ -22,8 +23,10 @@ export async function handleJobRun(db: Db, boss: PgBoss, payload: JobRunPayload)
 
   const [job] = await db.select().from(contentJobs).where(eq(contentJobs.id, jobId)).limit(1);
   if (!job) throw new Error(`content_job ${jobId} não existe`);
+  if (run.jobId !== jobId || run.workspaceId !== job.workspaceId) throw new Error('Queue ownership mismatch');
+  await assertWorkerWorkspace(db, run.workspaceId);
   const [site] = await db.select().from(sites).where(eq(sites.id, job.siteId)).limit(1);
-  if (!site) throw new Error(`site do job ${job.name} não existe`);
+  if (!site || site.workspaceId !== job.workspaceId) throw new Error(`site do job ${job.name} não existe`);
   const logger = createRunLogger(db, runId, `[job.run]`);
   const log = logger.log;
 

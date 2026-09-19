@@ -7,7 +7,7 @@ import { decryptSecret } from './vault';
  * grava credencial, então não precisa da chave ativa do vault — apenas do
  * conjunto de master keys para decifrar.
  */
-export type PlatformSecretType = 'stripe' | 'openai' | 'openrouter' | 'anthropic' | 'tavily';
+export type PlatformSecretType = 'stripe' | 'resend' | 'openai' | 'openrouter' | 'anthropic' | 'tavily';
 
 export async function readPlatformCredential<T extends Record<string, unknown>>(
   db: Db,

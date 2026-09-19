@@ -1,7 +1,8 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { eq } from 'drizzle-orm';
-import { getDb, subscriptions, workspaces } from '@content-pilot/db';
+import { getTenantDb, subscriptions, workspaces } from '@content-pilot/db';
 import { PLANS, type PlanId } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
@@ -17,9 +18,10 @@ const checkoutSchema = z.object({
  */
 export async function createCheckoutSessionAction(input: unknown): Promise<ActionResult<{ url: string }>> {
   return runAuthedAction(checkoutSchema, input, async ({ plan }, { workspaceId, email }) => {
-    if (!PLANS[plan as PlanId]?.purchasable) throw new Error('Plano inválido.');
+    if (process.env.BILLING_ENABLED !== 'true') throw new UserFacingError('Cobrança desativada nesta instalação.');
+    if (!PLANS[plan as PlanId]?.purchasable) throw new UserFacingError('Plano inválido.');
     const stripe = await getStripe();
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
 
     const [sub] = await db
       .select()
@@ -27,7 +29,7 @@ export async function createCheckoutSessionAction(input: unknown): Promise<Actio
       .where(eq(subscriptions.workspaceId, workspaceId))
       .limit(1);
     if (sub?.stripeSubscriptionId && sub.status !== 'canceled') {
-      throw new Error('Este workspace já tem assinatura ativa — gerencie o plano pelo portal de cobrança.');
+      throw new UserFacingError('Este workspace já tem assinatura ativa — gerencie o plano pelo portal de cobrança.');
     }
 
     const [ws] = await db
@@ -49,7 +51,7 @@ export async function createCheckoutSessionAction(input: unknown): Promise<Actio
       success_url: `${base}/billing?checkout=success`,
       cancel_url: `${base}/billing?checkout=cancelled`,
     });
-    if (!session.url) throw new Error('Stripe não retornou URL de checkout.');
+    if (!session.url) throw new UserFacingError('Stripe não retornou URL de checkout.');
     return { url: session.url };
   });
 }
@@ -59,14 +61,14 @@ const emptySchema = z.object({});
 /** Portal do cliente Stripe: trocar plano, cartão, cancelar. */
 export async function createPortalSessionAction(input: unknown): Promise<ActionResult<{ url: string }>> {
   return runAuthedAction(emptySchema, input ?? {}, async (_data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [sub] = await db
       .select({ stripeCustomerId: subscriptions.stripeCustomerId })
       .from(subscriptions)
       .where(eq(subscriptions.workspaceId, workspaceId))
       .limit(1);
     if (!sub?.stripeCustomerId) {
-      throw new Error('Nenhuma assinatura encontrada — assine um plano primeiro.');
+      throw new UserFacingError('Nenhuma assinatura encontrada — assine um plano primeiro.');
     }
     const stripe = await getStripe();
     const base = await appBaseUrl();

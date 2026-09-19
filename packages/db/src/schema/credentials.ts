@@ -8,9 +8,10 @@ import { workspaces } from './workspaces';
  * permitindo rotação. `maskedHint` são os últimos 4 chars capturados no save,
  * única parte exibida no painel.
  *
- * `workspaceId` NULL = credencial da PLATAFORMA (Fase 5): fallback global
- * usado quando o workspace não tem chave própria (cliente SaaS que não
- * configura nada). Só admins criam; o AAD do vault usa o escopo fixo
+ * `workspaceId` NULL = credencial da PLATAFORMA: chaves da instalação
+ * (Stripe, Resend e a reserva de IA/busca do proprietário). NÃO é fallback
+ * para os demais workspaces — quem resolve isso é canUsePlatformKeys, e todo
+ * o resto é BYOK. Só o super admin cria; o AAD do vault usa o escopo fixo
  * `platform` no lugar do workspaceId.
  */
 export const credentials = pgTable(
@@ -19,7 +20,7 @@ export const credentials = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     workspaceId: uuid('workspace_id').references(() => workspaces.id),
     type: text('type', {
-      enum: ['wordpress', 'anthropic', 'openai', 'openrouter', 'tavily', 'stripe'],
+      enum: ['wordpress', 'anthropic', 'openai', 'openrouter', 'tavily', 'stripe', 'resend'],
     }).notNull(),
     name: text('name').notNull(),
     ciphertext: text('ciphertext').notNull(),

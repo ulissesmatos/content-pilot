@@ -15,7 +15,7 @@ import { decryptSecret, encryptSecret } from '@/lib/vault';
  * graça.
  */
 
-export type PlatformSecretType = 'stripe' | 'openai' | 'openrouter' | 'anthropic' | 'tavily';
+export type PlatformSecretType = 'stripe' | 'resend' | 'openai' | 'openrouter' | 'anthropic' | 'tavily';
 
 export interface PlatformCredential<T> {
   id: string;

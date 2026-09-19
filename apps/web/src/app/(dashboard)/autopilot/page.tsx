@@ -8,7 +8,7 @@ import {
   contentTemplates,
   credentials,
   discoveredTopics,
-  getDb,
+  getTenantDb,
   llmCalls,
   runs,
   sites,
@@ -60,7 +60,7 @@ function toInitial(config: typeof autopilotConfigs.$inferSelect) {
 
 export default async function AutopilotPage() {
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('autopilot'), getLocale()]);
 
   const now = new Date();

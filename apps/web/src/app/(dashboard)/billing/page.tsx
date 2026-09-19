@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireSession } from '@/lib/auth';
-import { getMonthUsage, getSubscription, getWorkspacePlan } from '@/lib/billing';
+import { getConsumptionPlan, getMonthUsage, getSubscription, getWorkspacePlan } from '@/lib/billing';
 import { isStripeConfigured } from '@/lib/stripe';
 
 export const metadata = { title: 'Plano e cobrança' };
@@ -27,10 +27,13 @@ export default async function BillingPage({
   searchParams: Promise<{ checkout?: string }>;
 }) {
   const { workspaceId, role } = await requireSession();
-  const [t, locale, plan, sub, usage, params, stripeReady] = await Promise.all([
+  // `plan` governa sites/autopilots; `consumption` governa posts/tokens e já
+  // vem sem cotas quando o workspace paga a própria IA.
+  const [t, locale, plan, consumption, sub, usage, params, stripeReady] = await Promise.all([
     getTranslations('billing'),
     getLocale(),
     getWorkspacePlan(workspaceId),
+    getConsumptionPlan(workspaceId),
     getSubscription(workspaceId),
     getMonthUsage(workspaceId),
     searchParams,
@@ -55,15 +58,19 @@ export default async function BillingPage({
 
   const isUnlimited = plan.id === 'unlimited';
   const fmtLimit = (n: number) => (n >= Number.MAX_SAFE_INTEGER ? t('unlimited') : nf.format(n));
+  // BYOK só derruba consumo; o cartão precisa dizer isso para o usuário não
+  // achar que sites e autopilots também ficaram ilimitados.
+  const byokLifted = !isUnlimited && consumption.limits.postsPerMonth >= Number.MAX_SAFE_INTEGER;
+  const postsLimit = consumption.limits.postsPerMonth;
+  const tokensLimit = consumption.limits.tokensPerMonth;
 
-  const purchasable = (['starter', 'pro'] as const).filter((id) => PLANS[id].purchasable);
+  const purchasable = (['starter', 'pro'] as const).filter((id) => process.env.BILLING_ENABLED === 'true' && PLANS[id].purchasable);
 
   const features = (p: PlanDef) => [
     t('featPosts', { count: nf.format(p.limits.postsPerMonth) }),
     t('featTokens', { count: Math.round(p.limits.tokensPerMonth / 1_000_000) }),
     t('featSites', { count: p.limits.maxSites }),
     t('featAutopilots', { count: p.limits.maxAutopilots }),
-    ...(p.limits.platformKeysAllowed ? [t('featPlatformKeys')] : []),
     ...(p.limits.byokAllowed ? [t('featByok')] : []),
   ];
 
@@ -126,29 +133,37 @@ export default async function BillingPage({
               <div className="flex items-center justify-between text-sm">
                 <span>{t('postsUsed')}</span>
                 <span className="text-muted-foreground">
-                  {t('ofLimit', { used: nf.format(usage.postsCreated), limit: fmtLimit(plan.limits.postsPerMonth) })}
+                  {t('ofLimit', { used: nf.format(usage.postsCreated), limit: fmtLimit(postsLimit) })}
                 </span>
               </div>
-              {!isUnlimited ? <UsageBar used={usage.postsCreated} limit={plan.limits.postsPerMonth} /> : null}
+              {!isUnlimited && !byokLifted ? <UsageBar used={usage.postsCreated} limit={postsLimit} /> : null}
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-sm">
                 <span>{t('tokensUsed')}</span>
                 <span className="text-muted-foreground">
-                  {t('ofLimit', { used: nf.format(usage.tokensUsed), limit: fmtLimit(plan.limits.tokensPerMonth) })}
+                  {t('ofLimit', { used: nf.format(usage.tokensUsed), limit: fmtLimit(tokensLimit) })}
                 </span>
               </div>
-              {!isUnlimited ? <UsageBar used={usage.tokensUsed} limit={plan.limits.tokensPerMonth} /> : null}
+              {!isUnlimited && !byokLifted ? <UsageBar used={usage.tokensUsed} limit={tokensLimit} /> : null}
             </div>
             <div className="flex items-center justify-between border-t pt-3 text-sm">
               <span>{t('estimatedCost')}</span>
               <span className="font-medium">{money.format(usage.costUsd)}</span>
             </div>
+            {byokLifted ? (
+              <p className="text-muted-foreground text-sm">
+                {t('byokNoUsageLimits', {
+                  sites: plan.limits.maxSites,
+                  autopilots: plan.limits.maxAutopilots,
+                })}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </div>
 
-      {!isUnlimited && role !== 'admin' ? (
+      {purchasable.length > 0 && !isUnlimited && role !== 'admin' ? (
         <div className="mt-6">
           {!stripeReady ? (
             <p className="text-muted-foreground text-sm">{t('notConfigured')}</p>

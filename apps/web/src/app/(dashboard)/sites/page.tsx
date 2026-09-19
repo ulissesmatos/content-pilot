@@ -1,6 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { Globe } from 'lucide-react';
-import { credentials, getDb, sites } from '@content-pilot/db';
+import { credentials, getTenantDb, sites } from '@content-pilot/db';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { CreateSiteDialog } from '@/components/sites/create-site-dialog';
@@ -22,7 +22,7 @@ export const metadata = { title: 'Sites' };
 
 export default async function SitesPage() {
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('sites'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 

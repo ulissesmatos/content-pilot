@@ -1,3 +1,4 @@
+import { assertWorkerWorkspace } from '../lib/tenant';
 import {
   and,
   autopilotConfigs,
@@ -41,7 +42,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
   const { autopilotConfigId, runId } = payload;
   const startedAt = Date.now();
 
-  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run || run.status !== 'running') {
     console.log(`[autopilot ${autopilotConfigId}] run não está em execução — abortando`);
     return;
@@ -53,6 +54,8 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
     .where(eq(autopilotConfigs.id, autopilotConfigId))
     .limit(1);
   if (!cfg) throw new Error(`autopilot config ${autopilotConfigId} não existe`);
+  if (run.autopilotConfigId !== autopilotConfigId || run.workspaceId !== cfg.workspaceId) throw new Error('Queue ownership mismatch');
+  await assertWorkerWorkspace(db, run.workspaceId);
   const workspaceId = cfg.workspaceId;
   const logger = createRunLogger(db, runId, `[autopilot ${autopilotConfigId}]`);
   const log = logger.log;
@@ -110,7 +113,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
     const postsThisCycle = Math.min(discovery.postsPerCycle, remainingToday);
 
     const [site] = await db.select().from(sites).where(eq(sites.id, cfg.siteId)).limit(1);
-    if (!site) throw new Error('site da config não existe');
+    if (!site || site.workspaceId !== cfg.workspaceId) throw new Error('site da config não existe');
 
     const discoverModel = await resolveTaskModel(db, workspaceId, 'discover');
     const [wp, search, llmDiscover] = await Promise.all([

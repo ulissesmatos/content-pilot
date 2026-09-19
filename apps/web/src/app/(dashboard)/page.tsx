@@ -2,37 +2,25 @@ import Link from 'next/link';
 import { and, count, desc, eq, gte, isNotNull, sql } from 'drizzle-orm';
 import { AlertTriangle, CircleDollarSign, Globe, History, RefreshCw } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { contentJobs, getDb, llmCalls, runs, sites } from '@content-pilot/db';
+import { contentJobs, getTenantDb, llmCalls, runs, sites } from '@content-pilot/db';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { isWorkerAlive } from '@/lib/worker-health';
 import { requireSession } from '@/lib/auth';
-
-/** Worker saudável = scheduler.tick concluído nos últimos 3 minutos. */
-async function isWorkerAlive(): Promise<boolean | null> {
-  try {
-    const result = await getDb().execute(
-      sql`select max(completed_on) as last from pgboss.job where name = 'scheduler.tick' and state = 'completed'`,
-    );
-    const last = (result.rows?.[0] as { last: string | Date | null } | undefined)?.last;
-    if (!last) return false;
-    return Date.now() - new Date(last).getTime() < 3 * 60 * 1000;
-  } catch {
-    return null; // schema pgboss ainda não existe (worker nunca rodou)
-  }
-}
 
 export default async function OverviewPage() {
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('overview'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
 
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);

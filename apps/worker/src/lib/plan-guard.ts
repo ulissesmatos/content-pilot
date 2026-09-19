@@ -8,10 +8,17 @@ import {
   runs,
   sql,
   subscriptions,
+  usesOwnLlmKey,
   workspaces,
   type Db,
 } from '@content-pilot/db';
-import { effectivePlan, PlanLimitError, PLANS, type PlanDef } from '@content-pilot/core';
+import {
+  effectivePlan,
+  PlanLimitError,
+  PLANS,
+  withByokConsumption,
+  type PlanDef,
+} from '@content-pilot/core';
 
 /**
  * Enforcement de plano (Fase 5) — tudo determinístico, verificado ANTES de
@@ -84,12 +91,12 @@ export async function getMonthUsage(db: Db, workspaceId: string, now = new Date(
  * e antes do autopilot enfileirar gerações.
  */
 export async function assertPlanAllowsGeneration(db: Db, workspaceId: string): Promise<void> {
-  const plan = await getWorkspacePlan(db, workspaceId);
+  const plan = await consumptionPlan(db, workspaceId);
   if (plan.id === 'unlimited') return;
   const usage = await getMonthUsage(db, workspaceId);
   if (usage.postsCreated >= plan.limits.postsPerMonth) {
     throw new PlanLimitError(
-      `Limite de ${plan.limits.postsPerMonth} posts/mês do plano ${plan.id} atingido (${usage.postsCreated} criados). Faça upgrade em Cobrança.`,
+      `Limite de ${plan.limits.postsPerMonth} posts/mês atingido (${usage.postsCreated} criados). Cadastre sua própria chave de IA em Credenciais para gerar sem limite de volume.`,
       'postsPerMonth',
     );
   }
@@ -98,15 +105,26 @@ export async function assertPlanAllowsGeneration(db: Db, workspaceId: string): P
 
 /** Só o teto de tokens (jobs de ATUALIZAÇÃO consomem tokens mas não criam posts). */
 export async function assertPlanAllowsLlmUsage(db: Db, workspaceId: string): Promise<void> {
-  const plan = await getWorkspacePlan(db, workspaceId);
+  const plan = await consumptionPlan(db, workspaceId);
   if (plan.id === 'unlimited') return;
   assertTokensWithinPlan(plan, await getMonthUsage(db, workspaceId));
+}
+
+/**
+ * Plano visto pelos guards de consumo: o do workspace, com posts/tokens
+ * liberados quando ele traz a própria chave de IA. Os limites de sites e
+ * autopilots não passam por aqui — quem os cobra é o painel, com o plano cru.
+ */
+async function consumptionPlan(db: Db, workspaceId: string): Promise<PlanDef> {
+  const plan = await getWorkspacePlan(db, workspaceId);
+  if (plan.id === 'unlimited') return plan;
+  return withByokConsumption(plan, await usesOwnLlmKey(db, workspaceId));
 }
 
 function assertTokensWithinPlan(plan: PlanDef, usage: MonthUsage): void {
   if (usage.tokensUsed >= plan.limits.tokensPerMonth) {
     throw new PlanLimitError(
-      `Limite de ${Math.round(plan.limits.tokensPerMonth / 1_000_000)}M tokens/mês do plano ${plan.id} atingido. Faça upgrade em Cobrança.`,
+      `Limite de ${Math.round(plan.limits.tokensPerMonth / 1_000_000)}M tokens/mês atingido. Cadastre sua própria chave de IA em Credenciais para gerar sem limite de volume.`,
       'tokensPerMonth',
     );
   }

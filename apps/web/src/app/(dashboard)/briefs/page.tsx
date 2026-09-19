@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { ExternalLink, PenLine } from 'lucide-react';
-import { briefs, contentTemplates, getDb, runs, sites } from '@content-pilot/db';
+import { briefs, contentTemplates, getTenantDb, runs, sites } from '@content-pilot/db';
 import { CreateBriefDialog, EditBriefButton, type BriefFormInitial } from '@/components/briefs/create-brief-dialog';
 import {
   DeleteBriefButton,
@@ -21,7 +21,7 @@ export const metadata = { title: 'Criar posts' };
 
 export default async function BriefsPage() {
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('briefs'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 

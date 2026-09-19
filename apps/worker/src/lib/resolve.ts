@@ -1,3 +1,4 @@
+import { canUsePlatformKeys } from './platform-access';
 import {
   and,
   contentTemplates,
@@ -81,9 +82,9 @@ export async function resolveTemplateById(db: Db, templateId: string, workspaceI
 }
 
 /**
- * Cascata de credenciais (Fase 5): primeiro a chave do próprio workspace
- * (BYOK); se não houver, cai na credencial da plataforma (workspace NULL).
- * O cliente SaaS não configura chave nenhuma e tudo funciona.
+ * BYOK primeiro. Somente o workspace exclusivo do proprietário (ADMIN_EMAIL)
+ * pode usar as chaves do sistema como alternativa. Falta de chave nos demais
+ * workspaces encerra a operação, independentemente de plano ou isenção.
  */
 async function firstCredentialOfType(db: Db, workspaceId: string, type: string) {
   const [own] = await db
@@ -92,6 +93,7 @@ async function firstCredentialOfType(db: Db, workspaceId: string, type: string) 
     .where(and(eq(credentials.workspaceId, workspaceId), eq(credentials.type, type as never)))
     .limit(1);
   if (own) return own;
+  if (!await canUsePlatformKeys(db, workspaceId)) return null;
   const [platform] = await db
     .select()
     .from(credentials)
@@ -111,7 +113,7 @@ function decryptApiKey(cred: { ciphertext: string; workspaceId: string | null; i
 
 export async function resolveSearchClient(db: Db, workspaceId: string): Promise<SearchClient> {
   const cred = await firstCredentialOfType(db, workspaceId, 'tavily');
-  if (!cred) throw new Error('Nenhuma credencial Tavily disponível (workspace ou plataforma) — adicione em /credentials.');
+  if (!cred) throw new Error('Nenhuma credencial Tavily disponível — cadastre sua própria chave em /credentials.');
   return new TavilyClient(decryptApiKey(cred));
 }
 
@@ -125,21 +127,28 @@ export interface LlmTaskConfig {
 export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
   let cred;
   if (task.credentialId) {
-    // credencial explícita: do workspace ou da plataforma — nunca de outro workspace
+    // Even an explicit global credential ID must pass the owner check.
+    const allowPlatform = await canUsePlatformKeys(db, workspaceId);
     [cred] = await db
       .select()
       .from(credentials)
       .where(
         and(
           eq(credentials.id, task.credentialId),
-          or(eq(credentials.workspaceId, workspaceId), isNull(credentials.workspaceId)),
+          allowPlatform
+            ? or(eq(credentials.workspaceId, workspaceId), isNull(credentials.workspaceId))
+            : eq(credentials.workspaceId, workspaceId),
         ),
       )
       .limit(1);
+    if (!cred) throw new Error('Credencial indisponível para este workspace/provedor.');
   } else {
     cred = await firstCredentialOfType(db, workspaceId, task.provider);
   }
-  if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível (workspace ou plataforma) — adicione em /credentials.`);
+  if (cred && cred.type !== task.provider) {
+    throw new Error('Credencial indisponível para este workspace/provedor.');
+  }
+  if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível — cadastre sua própria chave em /credentials.`);
   return new HttpLlmProvider({
     provider: task.provider,
     model: task.model,

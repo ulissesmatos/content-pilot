@@ -1,3 +1,4 @@
+import { assertWorkerWorkspace } from '../lib/tenant';
 import {
   and,
   contentJobs,
@@ -46,7 +47,7 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
   }
 
   // Run cancelado pelo usuário → não processa mais nada dele
-  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run || run.status !== 'running') {
     console.log(`[post ${wpPostId}] run ${runId} não está em execução (${run?.status ?? 'inexistente'}) — pulando`);
     return;
@@ -54,8 +55,10 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
 
   const [job] = await db.select().from(contentJobs).where(eq(contentJobs.id, jobId)).limit(1);
   if (!job) throw new Error(`content_job ${jobId} não existe`);
+  if (run.jobId !== jobId || run.workspaceId !== job.workspaceId) throw new Error('Queue ownership mismatch');
+  await assertWorkerWorkspace(db, run.workspaceId);
   const [site] = await db.select().from(sites).where(eq(sites.id, job.siteId)).limit(1);
-  if (!site) throw new Error(`site do job não existe`);
+  if (!site || site.workspaceId !== job.workspaceId) throw new Error(`site do job não existe`);
   const workspaceId = job.workspaceId;
   const logger = createRunLogger(db, runId, `[post ${wpPostId}]`);
   const log = logger.log;

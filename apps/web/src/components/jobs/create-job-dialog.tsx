@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { CRON_PRESETS } from '@content-pilot/core';
+import { CRON_PRESETS } from '@content-pilot/core/client';
 import { createJobAction, updateJobAction } from '@/actions/jobs';
 import { QuickCreateSiteDialog } from '@/components/sites/quick-create-site-dialog';
 import { QuickCreateTemplateDialog } from '@/components/templates/quick-create-template-dialog';

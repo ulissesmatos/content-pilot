@@ -10,6 +10,10 @@ x-app-env: &app-env
   VAULT_MASTER_KEYS: ${VAULT_MASTER_KEYS:?defina VAULT_MASTER_KEYS no .env}
   VAULT_ACTIVE_KEY_ID: ${VAULT_ACTIVE_KEY_ID:-k1}
   WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+  # Vazios = recuperação de senha inativa. Podem ser definidos em /admin/settings.
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  BILLING_ENABLED: ${BILLING_ENABLED:-false}
 
 services:
   postgres:

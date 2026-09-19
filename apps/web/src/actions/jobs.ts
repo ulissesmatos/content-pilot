@@ -1,7 +1,8 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
-import { and, contentJobs, eq, getDb, runs, sites } from '@content-pilot/db';
+import { and, contentJobs, eq, getTenantDb, runs, sites } from '@content-pilot/db';
 import { jobLimitsSchema, jobLlmConfigSchema, nextRunAt as computeNextRunAt, postFilterSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
@@ -33,20 +34,20 @@ function parseIdList(raw: string): number[] {
 
 export async function createJobAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(createJobSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [site] = await db
       .select({ id: sites.id })
       .from(sites)
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
-    if (!site) throw new Error('Site não encontrado.');
+    if (!site) throw new UserFacingError('Site não encontrado.');
     await assertTemplateAccessible(data.templateId, workspaceId);
 
     let nextRunAt: Date;
     try {
       nextRunAt = computeNextRunAt(data.scheduleCron, data.timezone);
     } catch {
-      throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
+      throw new UserFacingError(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
     // O modelo vem do perfil do admin (model_profiles); a config guarda só
@@ -91,27 +92,27 @@ const updateJobSchema = createJobSchema.extend({ id: z.string().uuid() });
 /** Edita um job existente (nome, filtro, cron, modo, LLM). Recalcula o próximo disparo se ativo. */
 export async function updateJobAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(updateJobSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [job] = await db
       .select()
       .from(contentJobs)
       .where(and(eq(contentJobs.id, data.id), eq(contentJobs.workspaceId, workspaceId)))
       .limit(1);
-    if (!job) throw new Error('Job não encontrado.');
+    if (!job) throw new UserFacingError('Job não encontrado.');
 
     const [site] = await db
       .select({ id: sites.id })
       .from(sites)
       .where(and(eq(sites.id, data.siteId), eq(sites.workspaceId, workspaceId)))
       .limit(1);
-    if (!site) throw new Error('Site não encontrado.');
+    if (!site) throw new UserFacingError('Site não encontrado.');
     await assertTemplateAccessible(data.templateId, workspaceId);
 
     let nextRunAt: Date;
     try {
       nextRunAt = computeNextRunAt(data.scheduleCron, data.timezone);
     } catch {
-      throw new Error(`Expressão cron inválida: "${data.scheduleCron}"`);
+      throw new UserFacingError(`Expressão cron inválida: "${data.scheduleCron}"`);
     }
 
     // O modelo vem do perfil do admin (model_profiles); a config guarda só
@@ -151,13 +152,13 @@ export async function updateJobAction(input: unknown): Promise<ActionResult<{ id
 
 export async function toggleJobAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(toggleSchema, input, async ({ id, enabled }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [job] = await db
       .select()
       .from(contentJobs)
       .where(and(eq(contentJobs.id, id), eq(contentJobs.workspaceId, workspaceId)))
       .limit(1);
-    if (!job) throw new Error('Job não encontrado.');
+    if (!job) throw new UserFacingError('Job não encontrado.');
 
     await db
       .update(contentJobs)
@@ -175,14 +176,14 @@ export async function toggleJobAction(input: unknown): Promise<ActionResult> {
 
 export async function deleteJobAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     // Não excluir com execução em andamento — o worker precisaria de um job que não existe mais.
     const [running] = await db
       .select({ id: runs.id })
       .from(runs)
       .where(and(eq(runs.jobId, id), eq(runs.workspaceId, workspaceId), eq(runs.status, 'running')))
       .limit(1);
-    if (running) throw new Error('Este job tem uma execução em andamento — pare a execução antes de excluir.');
+    if (running) throw new UserFacingError('Este job tem uma execução em andamento — pare a execução antes de excluir.');
 
     // Histórico preservado (runs.job_id vira NULL); estado de fontes do job cai junto (cascade).
     await db.delete(contentJobs).where(and(eq(contentJobs.id, id), eq(contentJobs.workspaceId, workspaceId)));
@@ -194,13 +195,13 @@ export async function deleteJobAction(input: unknown): Promise<ActionResult> {
 
 export async function runJobNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [job] = await db
       .select()
       .from(contentJobs)
       .where(and(eq(contentJobs.id, id), eq(contentJobs.workspaceId, workspaceId)))
       .limit(1);
-    if (!job) throw new Error('Job não encontrado.');
+    if (!job) throw new UserFacingError('Job não encontrado.');
 
     const [run] = await db
       .insert(runs)
@@ -218,7 +219,7 @@ export async function runJobNowAction(input: unknown): Promise<ActionResult<{ ru
         .update(runs)
         .set({ status: 'cancelled', finishedAt: new Date(), error: 'execução anterior ainda em andamento' })
         .where(eq(runs.id, run!.id));
-      throw new Error('Já existe uma execução deste job em andamento.');
+      throw new UserFacingError('Já existe uma execução deste job em andamento.');
     }
 
     revalidatePath('/runs');

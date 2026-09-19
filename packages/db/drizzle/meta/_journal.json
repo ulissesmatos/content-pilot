@@ -57,6 +57,20 @@
       "when": 1788522321336,
       "tag": "0007_greedy_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789855709377,
+      "tag": "0008_tenant_isolation",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789860099846,
+      "tag": "0009_email_auth",
+      "breakpoints": true
     }
   ]
 }

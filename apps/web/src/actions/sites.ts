@@ -1,9 +1,10 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
-import { credentials, getDb, sites } from '@content-pilot/db';
-import { WordPressAdapter, type WordPressCredentials, type CmsConnectionResult } from '@content-pilot/core';
+import { credentials, getTenantDb, sites } from '@content-pilot/db';
+import { publicHttpsUrl, WordPressAdapter, type WordPressCredentials, type CmsConnectionResult } from '@content-pilot/core';
 import { z } from 'zod';
 import { isFkViolation, runAuthedAction, type ActionResult } from '@/lib/action-utils';
 import { getWorkspacePlan } from '@/lib/billing';
@@ -14,16 +15,16 @@ const createSiteSchema = z.object({
   baseUrl: z
     .string()
     .url('URL inválida')
-    .refine((u) => u.startsWith('https://') || u.startsWith('http://localhost'), {
-      message: 'Use HTTPS (application passwords do WP exigem HTTPS)',
-    }),
+    .refine((u) => {
+      try { const url = publicHttpsUrl(u); return !url.search && !url.hash; } catch { return false; }
+    }, { message: 'Use uma URL HTTPS pública, sem query, fragmento ou porta personalizada.' }),
   credentialId: z.string().uuid('Selecione uma credencial'),
   defaultLanguage: z.string().min(2).max(10),
 });
 
 export async function createSiteAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return runAuthedAction(createSiteSchema, input, async (data, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
 
     // limite de sites do plano (Fase 5)
     const plan = await getWorkspacePlan(workspaceId);
@@ -32,7 +33,7 @@ export async function createSiteAction(input: unknown): Promise<ActionResult<{ i
       .from(sites)
       .where(eq(sites.workspaceId, workspaceId));
     if (existing.length >= plan.limits.maxSites) {
-      throw new Error(
+      throw new UserFacingError(
         `Seu plano permite ${plan.limits.maxSites} site(s). Faça upgrade em Plano e cobrança para conectar mais.`,
       );
     }
@@ -43,7 +44,7 @@ export async function createSiteAction(input: unknown): Promise<ActionResult<{ i
       .where(and(eq(credentials.id, data.credentialId), eq(credentials.workspaceId, workspaceId)))
       .limit(1);
     if (!cred || cred.type !== 'wordpress') {
-      throw new Error('Credencial WordPress não encontrada.');
+      throw new UserFacingError('Credencial WordPress não encontrada.');
     }
 
     const [site] = await db
@@ -67,12 +68,12 @@ const idSchema = z.object({ id: z.string().uuid() });
 export async function deleteSiteAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
     try {
-      await getDb()
+      await getTenantDb(workspaceId)
         .delete(sites)
         .where(and(eq(sites.id, id), eq(sites.workspaceId, workspaceId)));
     } catch (err) {
       if (isFkViolation(err)) {
-        throw new Error('Este site tem jobs, pautas ou autopilots apontando para ele — exclua-os primeiro.');
+        throw new UserFacingError('Este site tem jobs, pautas ou autopilots apontando para ele — exclua-os primeiro.');
       }
       throw err;
     }
@@ -83,7 +84,7 @@ export async function deleteSiteAction(input: unknown): Promise<ActionResult> {
 
 export async function testSiteConnectionAction(input: unknown): Promise<ActionResult<CmsConnectionResult>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [row] = await db
       .select({
         site: sites,
@@ -94,7 +95,7 @@ export async function testSiteConnectionAction(input: unknown): Promise<ActionRe
       .innerJoin(credentials, eq(sites.credentialId, credentials.id))
       .where(and(eq(sites.id, id), eq(sites.workspaceId, workspaceId)))
       .limit(1);
-    if (!row) throw new Error('Site não encontrado.');
+    if (!row) throw new UserFacingError('Site não encontrado.');
 
     const wpCreds = decryptSecret<WordPressCredentials>(row.credCiphertext, workspaceId, row.credId);
     const adapter = new WordPressAdapter(row.site.baseUrl, wpCreds, { retries: 1, timeoutMs: 20_000 });

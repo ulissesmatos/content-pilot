@@ -15,6 +15,7 @@
     "typecheck": "pnpm -r typecheck",
     "db:generate": "pnpm --filter @content-pilot/db generate",
     "db:migrate": "pnpm --filter @content-pilot/db migrate",
-    "db:seed": "pnpm --filter @content-pilot/db seed"
+    "db:seed": "pnpm --filter @content-pilot/db seed",
+    "test:integration": "pnpm --filter @content-pilot/db test:integration"
   }
 }

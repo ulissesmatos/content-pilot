@@ -7,7 +7,7 @@ import {
   briefs,
   contentJobs,
   discoveredTopics,
-  getDb,
+  getTenantDb,
   llmCalls,
   runItems,
   runLogs,
@@ -53,7 +53,7 @@ function backupPreview(html: string | null): string | null {
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { workspaceId } = await requireSession();
-  const db = getDb();
+  const db = getTenantDb(workspaceId);
   const [t, tRuns, tStatus, locale] = await Promise.all([
     getTranslations('runDetail'),
     getTranslations('runs'),

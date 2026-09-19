@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { desc, eq, isNull, or } from 'drizzle-orm';
 import { LayoutTemplate } from 'lucide-react';
-import { contentTemplates, getDb } from '@content-pilot/db';
+import { contentTemplates, getTenantDb } from '@content-pilot/db';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { CloneTemplateButton, DeleteTemplateButton } from '@/components/templates/template-row-actions';
@@ -17,7 +17,7 @@ export const metadata = { title: 'Templates' };
 export default async function TemplatesPage() {
   const { workspaceId } = await requireSession();
   const tr = await getTranslations('templates');
-  const rows = await getDb()
+  const rows = await getTenantDb(workspaceId)
     .select()
     .from(contentTemplates)
     .where(or(isNull(contentTemplates.workspaceId), eq(contentTemplates.workspaceId, workspaceId)))

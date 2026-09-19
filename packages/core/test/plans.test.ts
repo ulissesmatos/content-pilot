@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectivePlan, planById, PLANS } from '../src/billing/plans';
+import { effectivePlan, planById, PLANS, withByokConsumption } from '../src/billing/plans';
 import { autopilotLimitsSchema, parseAutopilotLimits } from '../src/autopilot/schema';
 import { rankCandidates } from '../src/images/illustrate';
 import type { ImageCandidate } from '../src/images/openverse';
@@ -27,16 +27,43 @@ describe('planos (billing)', () => {
     expect(effectivePlan({ plan: 'x', status: 'active' }).id).toBe('free');
   });
 
-  it('BYOK é recurso do pro; free/starter usam chaves da plataforma', () => {
-    expect(PLANS.free.limits.byokAllowed).toBe(false);
-    expect(PLANS.starter.limits.byokAllowed).toBe(false);
-    expect(PLANS.pro.limits.byokAllowed).toBe(true);
-    expect(PLANS.free.limits.platformKeysAllowed).toBe(true);
+  it('todos os planos permitem BYOK e nenhum concede chaves da plataforma', () => {
+    for (const plan of Object.values(PLANS)) {
+      expect(plan.limits.byokAllowed).toBe(true);
+      expect(plan.limits).not.toHaveProperty('platformKeysAllowed');
+    }
   });
 
   it('unlimited não é comprável', () => {
     expect(PLANS.unlimited.purchasable).toBe(false);
     expect(PLANS.free.purchasable).toBe(false);
+  });
+});
+
+describe('withByokConsumption (quem paga a própria IA não tem cota de volume)', () => {
+  it('BYOK derruba posts e tokens em qualquer plano', () => {
+    for (const id of ['free', 'starter', 'pro'] as const) {
+      const byok = withByokConsumption(PLANS[id], true);
+      expect(byok.limits.postsPerMonth).toBe(Number.MAX_SAFE_INTEGER);
+      expect(byok.limits.tokensPerMonth).toBe(Number.MAX_SAFE_INTEGER);
+    }
+  });
+
+  it('BYOK NÃO mexe em sites e autopilots — eles rodam no nosso servidor', () => {
+    const byok = withByokConsumption(PLANS.free, true);
+    expect(byok.limits.maxSites).toBe(PLANS.free.limits.maxSites);
+    expect(byok.limits.maxAutopilots).toBe(PLANS.free.limits.maxAutopilots);
+    expect(byok.id).toBe('free');
+  });
+
+  it('sem BYOK devolve o plano intacto, sem cópia', () => {
+    expect(withByokConsumption(PLANS.free, false)).toBe(PLANS.free);
+  });
+
+  it('não muta o plano original', () => {
+    withByokConsumption(PLANS.free, true);
+    expect(PLANS.free.limits.postsPerMonth).toBe(5);
+    expect(PLANS.free.limits.tokensPerMonth).toBe(1_000_000);
   });
 });
 

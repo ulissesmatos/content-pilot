@@ -1,3 +1,4 @@
+import { assertWorkerWorkspace } from '../lib/tenant';
 import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
 import {
   checkTopicAlreadyCovered,
@@ -29,7 +30,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
   const { briefId, runId } = payload;
   const startedAt = Date.now();
 
-  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run || run.status !== 'running') {
     console.log(`[brief ${briefId}] run não está em execução — abortando`);
     return;
@@ -37,6 +38,8 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
 
   const [brief] = await db.select().from(briefs).where(eq(briefs.id, briefId)).limit(1);
   if (!brief) throw new Error(`brief ${briefId} não existe`);
+  if (run.briefId !== briefId || run.workspaceId !== brief.workspaceId) throw new Error('Queue ownership mismatch');
+  await assertWorkerWorkspace(db, run.workspaceId);
   const workspaceId = brief.workspaceId;
   const logger = createRunLogger(db, runId, `[brief ${briefId}]`);
   const log = logger.log;
@@ -76,7 +79,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     await db.update(briefs).set({ status: 'generating', updatedAt: new Date() }).where(eq(briefs.id, briefId));
 
     const [site] = await db.select().from(sites).where(eq(sites.id, brief.siteId)).limit(1);
-    if (!site) throw new Error('site da pauta não existe');
+    if (!site || site.workspaceId !== brief.workspaceId) throw new Error('site da pauta não existe');
 
     // O modelo vem do perfil configurado pelo admin; do JSONB da pauta só
     // aproveitamos o orçamento de tokens.

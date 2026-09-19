@@ -1,0 +1,36 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: contentpilot_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test-only@localhost:5432/contentpilot_test
+      DATABASE_URL: postgres://postgres:test-only@localhost:5432/contentpilot_test
+      AUTH_SECRET: ci-only-not-a-production-secret-32-characters
+      AUTH_URL: http://localhost:3000
+      ADMIN_EMAIL: admin@example.test
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:integration
+      - run: pnpm --filter web lint
+      - run: pnpm build
+      - run: pnpm audit --prod

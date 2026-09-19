@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { desc, eq } from 'drizzle-orm';
 import { History } from 'lucide-react';
-import { autopilotConfigs, briefs, contentJobs, getDb, runs } from '@content-pilot/db';
+import { autopilotConfigs, briefs, contentJobs, getTenantDb, runs } from '@content-pilot/db';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
@@ -30,7 +30,7 @@ export default async function RunsPage() {
   const { workspaceId } = await requireSession();
   const [t, locale] = await Promise.all([getTranslations('runs'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
-  const rows = await getDb()
+  const rows = await getTenantDb(workspaceId)
     .select({
       run: runs,
       jobName: contentJobs.name,

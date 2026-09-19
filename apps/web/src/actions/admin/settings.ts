@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { setSetting } from '@content-pilot/db';
-import { SETTINGS_KEYS, stripeSettingsSchema } from '@content-pilot/core';
+import { emailSettingsSchema, isValidSender, SETTINGS_KEYS, stripeSettingsSchema } from '@content-pilot/core';
 import { runAdminAction } from '@/lib/admin-action';
 import { upsertPlatformCredential } from '@/lib/platform-secrets';
 import type { ActionResult } from '@/lib/action-utils';
@@ -94,6 +94,73 @@ export async function saveStripeSettingsAction(input: unknown): Promise<ActionRe
       });
       await setSetting(tx, SETTINGS_KEYS.stripe, next, session.userId);
       audit({ targetId: SETTINGS_KEYS.stripe, diff: { after: next } });
+      revalidatePath('/admin/settings');
+      return null;
+    },
+  );
+}
+
+const resendKeySchema = z.object({
+  // Chave do Resend: re_… — o prefixo é estável e pega erro de colagem antes
+  // de virar 401 silencioso no primeiro pedido de senha esquecida.
+  apiKey: z
+    .string()
+    .trim()
+    .min(8, 'Chave muito curta')
+    .max(300)
+    .refine((v) => /^re_[A-Za-z0-9_-]{8,}$/.test(v), { message: 'Formato inválido — esperado re_…' }),
+});
+
+/** Chave do Resend no cofre. Só o super admin: ela envia e-mail em nome do domínio. */
+export async function saveResendKeyAction(input: unknown): Promise<ActionResult<{ id: string }>> {
+  return runAdminAction(
+    resendKeySchema,
+    input,
+    { action: 'settings.resend.key', targetType: 'credential', superAdminOnly: true },
+    async (data, { tx, audit }) => {
+      const result = await upsertPlatformCredential(tx, {
+        type: 'resend',
+        name: 'Resend (plataforma)',
+        patch: { apiKey: data.apiKey },
+        hintField: 'apiKey',
+      });
+      audit({ targetId: result.id, diff: { created: result.created, updatedFields: ['apiKey'] } });
+      revalidatePath('/admin/settings');
+      return { id: result.id };
+    },
+  );
+}
+
+const emailSenderSchema = z.object({
+  fromAddress: z
+    .string()
+    .max(200)
+    .optional()
+    .transform((v) => v?.trim() ?? '')
+    .refine((v) => v === '' || isValidSender(v), {
+      message: 'Use conta@dominio.com ou Nome <conta@dominio.com>.',
+    }),
+  replyTo: z
+    .string()
+    .max(200)
+    .optional()
+    .transform((v) => v?.trim() ?? '')
+    .refine((v) => v === '' || isValidSender(v), { message: 'Endereço inválido.' }),
+});
+
+/** Remetente dos e-mails transacionais (não é segredo — vai em platform_settings). */
+export async function saveEmailSettingsAction(input: unknown): Promise<ActionResult<null>> {
+  return runAdminAction(
+    emailSenderSchema,
+    input,
+    { action: 'settings.email.sender', targetType: 'settings', superAdminOnly: true },
+    async (data, { tx, session, audit }) => {
+      const next = emailSettingsSchema.parse({
+        fromAddress: data.fromAddress === '' ? null : data.fromAddress,
+        replyTo: data.replyTo === '' ? null : data.replyTo,
+      });
+      await setSetting(tx, SETTINGS_KEYS.email, next, session.userId);
+      audit({ targetId: SETTINGS_KEYS.email, diff: { after: next } });
       revalidatePath('/admin/settings');
       return null;
     },

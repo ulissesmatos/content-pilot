@@ -1,10 +1,11 @@
 'use server';
 
+import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
-import { and, contentJobs, eq, getDb, runItems, runs, sql } from '@content-pilot/db';
+import { and, contentJobs, eq, getTenantDb, runItems, runs } from '@content-pilot/db';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
-import { getBoss } from '@/lib/boss';
+import { getBoss, pendingRunJobs } from '@/lib/boss';
 import { getWordPressForSite } from '@/lib/wp';
 
 const idSchema = z.object({ id: z.string().uuid() });
@@ -19,14 +20,14 @@ const RETRYABLE = new Set(['llm_failed', 'wp_failed', 'validation_failed', 'fail
  */
 export async function cancelRunAction(input: unknown): Promise<ActionResult<{ cancelledQueued: number }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [run] = await db
       .select({ id: runs.id, status: runs.status })
       .from(runs)
       .where(and(eq(runs.id, id), eq(runs.workspaceId, workspaceId)))
       .limit(1);
-    if (!run) throw new Error('Execução não encontrada.');
-    if (run.status !== 'running') throw new Error('Esta execução não está em andamento.');
+    if (!run) throw new UserFacingError('Execução não encontrada.');
+    if (run.status !== 'running') throw new UserFacingError('Esta execução não está em andamento.');
 
     await db
       .update(runs)
@@ -34,13 +35,7 @@ export async function cancelRunAction(input: unknown): Promise<ActionResult<{ ca
       .where(and(eq(runs.id, id), eq(runs.status, 'running')));
 
     // Cancela o que ainda não foi pego pelo worker (created/retry) na fila
-    const pending = await db.execute(
-      sql`select id::text as id, name from pgboss.job
-          where state in ('created', 'retry')
-            and name in ('job.run', 'post.process', 'brief.generate', 'autopilot.discover')
-            and (data ->> 'runId') = ${id}`,
-    );
-    const rows = (pending.rows ?? []) as Array<{ id: string; name: string }>;
+    const rows = await pendingRunJobs(workspaceId, id);
     if (rows.length > 0) {
       const boss = await getBoss();
       const byQueue = new Map<string, string[]>();
@@ -65,19 +60,19 @@ export async function cancelRunAction(input: unknown): Promise<ActionResult<{ ca
  */
 export async function retryRunItemAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [row] = await db
       .select({ item: runItems, run: runs })
       .from(runItems)
       .innerJoin(runs, eq(runItems.runId, runs.id))
       .where(and(eq(runItems.id, id), eq(runItems.workspaceId, workspaceId)))
       .limit(1);
-    if (!row) throw new Error('Item não encontrado.');
+    if (!row) throw new UserFacingError('Item não encontrado.');
     const { item, run } = row;
-    if (run.kind !== 'update') throw new Error('Retry por item só existe para execuções de atualização — para pautas use "Regerar".');
-    if (!RETRYABLE.has(item.status)) throw new Error('Este item não falhou — nada a tentar de novo.');
-    if (!item.wpPostId) throw new Error('Item sem post do WordPress associado.');
-    if (!run.jobId) throw new Error('O job desta execução foi excluído — crie um novo job para reprocessar o post.');
+    if (run.kind !== 'update') throw new UserFacingError('Retry por item só existe para execuções de atualização — para pautas use "Regerar".');
+    if (!RETRYABLE.has(item.status)) throw new UserFacingError('Este item não falhou — nada a tentar de novo.');
+    if (!item.wpPostId) throw new UserFacingError('Item sem post do WordPress associado.');
+    if (!run.jobId) throw new UserFacingError('O job desta execução foi excluído — crie um novo job para reprocessar o post.');
 
     const [newRun] = await db
       .insert(runs)
@@ -95,7 +90,7 @@ export async function retryRunItemAction(input: unknown): Promise<ActionResult<{
         .update(runs)
         .set({ status: 'cancelled', finishedAt: new Date(), error: 'reprocessamento já em andamento' })
         .where(eq(runs.id, newRun!.id));
-      throw new Error('Já existe um reprocessamento deste post em andamento.');
+      throw new UserFacingError('Já existe um reprocessamento deste post em andamento.');
     }
 
     revalidatePath('/runs');
@@ -109,25 +104,25 @@ export async function retryRunItemAction(input: unknown): Promise<ActionResult<{
  */
 export async function restoreRunItemAction(input: unknown): Promise<ActionResult> {
   return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
-    const db = getDb();
+    const db = getTenantDb(workspaceId);
     const [row] = await db
       .select({ item: runItems, run: runs })
       .from(runItems)
       .innerJoin(runs, eq(runItems.runId, runs.id))
       .where(and(eq(runItems.id, id), eq(runItems.workspaceId, workspaceId)))
       .limit(1);
-    if (!row) throw new Error('Item não encontrado.');
+    if (!row) throw new UserFacingError('Item não encontrado.');
     const { item, run } = row;
-    if (!item.previousContentBackup) throw new Error('Este item não tem backup de conteúdo.');
-    if (!item.wpPostId) throw new Error('Item sem post do WordPress associado.');
-    if (!run.jobId) throw new Error('O job desta execução foi excluído — não é possível resolver o site do post.');
+    if (!item.previousContentBackup) throw new UserFacingError('Este item não tem backup de conteúdo.');
+    if (!item.wpPostId) throw new UserFacingError('Item sem post do WordPress associado.');
+    if (!run.jobId) throw new UserFacingError('O job desta execução foi excluído — não é possível resolver o site do post.');
 
     const [job] = await db
       .select({ siteId: contentJobs.siteId })
       .from(contentJobs)
       .where(eq(contentJobs.id, run.jobId))
       .limit(1);
-    if (!job) throw new Error('Job da execução não encontrado.');
+    if (!job) throw new UserFacingError('Job da execução não encontrado.');
 
     const wp = await getWordPressForSite(workspaceId, job.siteId);
     await wp.updatePost(item.wpPostId, { content: item.previousContentBackup });

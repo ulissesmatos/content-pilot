@@ -63,7 +63,15 @@ export default function LoginPage() {
                 <Input id="email" name="email" type="email" autoComplete="email" required autoFocus />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">{t('password')}</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">{t('password')}</Label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-muted-foreground text-sm underline-offset-4 hover:underline"
+                  >
+                    {t('forgotLink')}
+                  </Link>
+                </div>
                 <Input id="password" name="password" type="password" autoComplete="current-password" required />
               </div>
               {error ? <p className="text-destructive text-sm">{t('invalidCredentials')}</p> : null}

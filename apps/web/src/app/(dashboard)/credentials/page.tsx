@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
 import { KeyRound } from 'lucide-react';
-import { credentials, getDb } from '@content-pilot/db';
+import { credentials, getTenantDb } from '@content-pilot/db';
 import { CreateCredentialDialog } from '@/components/credentials/create-credential-dialog';
 import { credentialTypeLabel } from '@/components/credentials/credential-type';
 import { DeleteCredentialButton } from '@/components/credentials/delete-credential-button';
@@ -22,12 +22,12 @@ import { requireSession } from '@/lib/auth';
 export const metadata = { title: 'Credenciais' };
 
 export default async function CredentialsPage() {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, isSuperAdmin } = await requireSession();
   const [t, locale] = await Promise.all([getTranslations('credentials'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   // Só as credenciais do próprio workspace: as chaves da plataforma são
   // gerenciadas em /admin/ai/keys e não aparecem no painel do cliente.
-  const rows = await getDb()
+  const rows = await getTenantDb(workspaceId)
     .select({
       id: credentials.id,
       type: credentials.type,
@@ -45,6 +45,7 @@ export default async function CredentialsPage() {
       <PageHeader title={t('title')} description={t('description')}>
         <CreateCredentialDialog />
       </PageHeader>
+      {!isSuperAdmin ? <p className="text-muted-foreground mb-6 text-sm">{t('ownKeysNotice')}</p> : null}
       {rows.length === 0 ? (
         <EmptyState icon={KeyRound} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (

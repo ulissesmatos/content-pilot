@@ -34,3 +34,49 @@ jobs:
       - run: pnpm --filter web lint
       - run: pnpm build
       - run: pnpm audit --prod
+
+  # Roda só em push no main (nunca em PR) e só depois do verify passar.
+  # Idempotente: se a versão do package.json já tem tag, não faz nada — então
+  # um merge sem bump de versão não falha aqui, só pula a criação da release.
+  release:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG já existe — nenhuma versão nova neste merge."
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --title "$TAG" --generate-notes
+
+  # Dispara o redeploy no Coolify via webhook — precisa dos secrets
+  # COOLIFY_WEBHOOK_URL (URL completa, com o uuid do recurso) e COOLIFY_TOKEN
+  # (token de API do Coolify) cadastrados em Settings → Secrets do repositório.
+  deploy:
+    needs: [verify, release]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_WEBHOOK_URL" ] || [ -z "$COOLIFY_TOKEN" ]; then
+            echo "::error::Defina os secrets COOLIFY_WEBHOOK_URL e COOLIFY_TOKEN para o deploy automático funcionar."
+            exit 1
+          fi
+          curl --fail --silent --show-error --request GET "$COOLIFY_WEBHOOK_URL" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN"

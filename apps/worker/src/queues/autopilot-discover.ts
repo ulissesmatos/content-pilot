@@ -23,6 +23,7 @@ import {
 } from '@content-pilot/core';
 import type { PgBoss } from 'pg-boss';
 import {
+  preflightLlmTasks,
   resolveLlmProvider,
   resolveSearchClient,
   resolveWordPressAdapter,
@@ -116,6 +117,21 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
     if (!site || site.workspaceId !== cfg.workspaceId) throw new Error('site da config não existe');
 
     const discoverModel = await resolveTaskModel(db, workspaceId, 'discover');
+
+    // Check-up de credenciais ANTES de gastar qualquer busca: confere que o
+    // modelo configurado existe de fato na conta do provedor (grátis — usa a
+    // listagem de modelos, não uma chamada de geração). Sem isto, a busca no
+    // Tavily já rodava (e gastava) antes do job estourar no LLM lá na frente.
+    const preflightIssues = await preflightLlmTasks(db, workspaceId, [
+      { ...discoverModel, label: 'Descoberta de temas' },
+    ]);
+    if (preflightIssues.length > 0) {
+      const reason = preflightIssues.join(' ');
+      log(`check-up de credenciais falhou — nada gasto: ${reason}`);
+      await finalizeFailed(reason);
+      return;
+    }
+
     const [wp, search, llmDiscover] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveSearchClient(db, workspaceId),

@@ -13,11 +13,16 @@ import {
 } from '@content-pilot/db';
 import {
   credentialVaultScope,
+  fetchAnthropicModels,
+  fetchOpenAiModels,
+  fetchOpenRouterModels,
+  HttpError,
   HttpLlmProvider,
   OpenAiImageGenClient,
   TavilyClient,
   WordPressAdapter,
   parseTemplateConfig,
+  type CatalogModel,
   type ImageGenClient,
   type LlmProvider,
   type LlmProviderName,
@@ -179,7 +184,13 @@ export interface LlmTaskConfig {
  *    um modelo padrão razoável. É o caso pedido: sem chave OpenRouter mas com
  *    chave OpenAI, o pipeline continua rodando via OpenAI.
  */
-export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
+interface ResolvedLlmCredential {
+  provider: LlmProviderName;
+  model: string;
+  apiKey: string;
+}
+
+async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<ResolvedLlmCredential> {
   if (task.credentialId) {
     // Even an explicit global credential ID must pass the owner check.
     const allowPlatform = await canUsePlatformKeys(db, workspaceId);
@@ -197,13 +208,7 @@ export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmT
       .limit(1);
     if (!cred) throw new Error('Credencial indisponível para este workspace/provedor.');
     if (cred.type !== task.provider) throw new Error('Credencial indisponível para este workspace/provedor.');
-    return new HttpLlmProvider({
-      provider: task.provider,
-      model: task.model,
-      apiKey: decryptApiKey(cred),
-      maxTokensCap: task.maxTokens,
-      openrouter: task.provider === 'openrouter' ? { appName: 'Content Pilot' } : undefined,
-    });
+    return { provider: task.provider, model: task.model, apiKey: decryptApiKey(cred) };
   }
 
   let provider = task.provider;
@@ -238,13 +243,94 @@ export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmT
     throw new Error('Credencial indisponível para este workspace/provedor.');
   }
   if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível — cadastre sua própria chave em /credentials.`);
+  return { provider, model, apiKey: decryptApiKey(cred) };
+}
+
+/**
+ * Resolve provedor/modelo/credencial de uma etapa do pipeline.
+ *
+ * Ordem de decisão:
+ * 1. `credentialId` explícito (fluxo antigo, intocado).
+ * 2. Preferência do próprio workspace (`workspace_ai_settings`, só tem efeito
+ *    em BYOK): se o cliente escolheu provedor+modelo e AINDA tem a credencial
+ *    daquele provedor, essa escolha vale — mesmo que o perfil do admin
+ *    aponte para outro provedor.
+ * 3. Provedor do perfil do admin: credencial própria do workspace, com
+ *    cascata para a chave da plataforma quando permitido (comportamento de
+ *    sempre).
+ * 4. Fallback automático: nenhuma credencial (própria ou de plataforma) para
+ *    o provedor do perfil, mas o workspace tem OUTRA credencial de IA própria
+ *    — usa essa, com o modelo que o cliente escolheu para ela (se bater) ou
+ *    um modelo padrão razoável. É o caso pedido: sem chave OpenRouter mas com
+ *    chave OpenAI, o pipeline continua rodando via OpenAI.
+ */
+export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
+  const { provider, model, apiKey } = await resolveLlmCredential(db, workspaceId, task);
   return new HttpLlmProvider({
     provider,
     model,
-    apiKey: decryptApiKey(cred),
+    apiKey,
     maxTokensCap: task.maxTokens,
     openrouter: provider === 'openrouter' ? { appName: 'Content Pilot' } : undefined,
   });
+}
+
+/** Uma etapa nomeada para o preflight — o nome é o que aparece na mensagem de erro. */
+export interface PreflightLlmTask extends LlmTaskConfig {
+  label: string;
+}
+
+/**
+ * Confere ANTES de gastar qualquer chamada de busca/geração que o modelo
+ * configurado existe de fato na conta do provedor resolvido — sem gastar
+ * tokens: usa a mesma listagem de modelos do catálogo (grátis em todo
+ * provedor). Só assim um "openai/gpt-5.4-nano" copiado errado do formato do
+ * OpenRouter para um perfil provider=openai é pego antes da busca rodar, em
+ * vez de estourar HTTP 400 no meio do job já com Tavily gasto.
+ *
+ * Erro de rede/instabilidade ao buscar o catálogo NUNCA vira falha aqui — só
+ * bloqueia quando a lista responde e o modelo comprovadamente não está nela,
+ * ou quando a chave é rejeitada (401/403). Instabilidade momentânea do
+ * endpoint de listagem não pode derrubar um job que talvez rodasse bem.
+ */
+export async function preflightLlmTasks(
+  db: Db,
+  workspaceId: string,
+  tasks: PreflightLlmTask[],
+): Promise<string[]> {
+  const issues: string[] = [];
+  await Promise.all(
+    tasks.map(async (task) => {
+      let resolved: ResolvedLlmCredential;
+      try {
+        resolved = await resolveLlmCredential(db, workspaceId, task);
+      } catch (err) {
+        issues.push(`${task.label}: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      let models: CatalogModel[];
+      try {
+        models =
+          resolved.provider === 'openai'
+            ? await fetchOpenAiModels(resolved.apiKey, { timeoutMs: 10_000 })
+            : resolved.provider === 'anthropic'
+              ? await fetchAnthropicModels(resolved.apiKey, { timeoutMs: 10_000 })
+              : await fetchOpenRouterModels({ timeoutMs: 10_000 }); // pública — não valida a chave, só o id do modelo
+      } catch (err) {
+        if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+          issues.push(`${task.label}: chave ${resolved.provider} rejeitada pelo provedor (${err.status}) — verifique em /credentials.`);
+        }
+        // qualquer outro erro (timeout, 5xx, instabilidade) não bloqueia — não dá pra confirmar, mas também não dá pra culpar a config
+        return;
+      }
+      if (!models.some((m) => m.modelId === resolved.model)) {
+        issues.push(
+          `${task.label}: modelo "${resolved.model}" não existe na conta ${resolved.provider} — corrija em /admin/ai/profiles ou em /credentials.`,
+        );
+      }
+    }),
+  );
+  return issues;
 }
 
 /**

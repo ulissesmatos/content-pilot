@@ -131,6 +131,46 @@ check daquele container — `web` e `worker` é que precisam ficar de pé.
 `git push` na branch configurada. Com webhook ativo o Coolify rebuilda sozinho;
 senão, **Redeploy**. O `migrate` roda antes de web/worker subirem.
 
+Duas formas de automatizar o "webhook ativo" acima — escolha uma, não as duas:
+
+**A. Nativo do Coolify** (zero código): no recurso, aba **Source**, conecte o
+GitHub App e ligue **Auto Deploy**. O Coolify passa a observar pushes na
+branch configurada sozinho.
+
+**B. GitHub Actions** (`.github/workflows/verify.yml`, jobs `release` e
+`deploy`): dispara **depois** que `pnpm typecheck`/`test`/`build` passam no
+`main` — protege contra deployar um commit quebrado, o que o modo nativo não
+faz sozinho. Requer dois secrets em **Settings → Secrets and variables →
+Actions** do repositório:
+
+| Secret | Onde pegar |
+|---|---|
+| `COOLIFY_WEBHOOK_URL` | No recurso do Coolify → **Webhooks** (ou **Settings** → **Webhook**) → copie a URL completa (já traz o uuid do recurso). |
+| `COOLIFY_TOKEN` | Coolify → seu usuário → **API Tokens** → crie um com permissão de deploy. |
+
+O mesmo job também cria uma tag `vX.Y.Z` e uma GitHub Release quando a versão
+em `package.json` muda (ver `CHANGELOG.md`) — idempotente, não falha se a tag
+já existir.
+
+### Health check mostrando "unknown"
+
+O `web` já tem `HEALTHCHECK` tanto na imagem (`Dockerfile`) quanto no
+`docker-compose.coolify.yml`, batendo em `/api/health`. Se o painel do Coolify
+mostra "unknown" em vez de healthy/unhealthy:
+
+1. **Redeploy** depois de qualquer mudança no Dockerfile/compose — o Coolify
+   só relê o healthcheck ao recriar o container, não num container já rodando.
+2. Espere passar o `start_period` (40s) antes de julgar o status — durante a
+   janela inicial o Docker não reporta nada, o que também aparece como
+   "unknown" por alguns segundos.
+3. No recurso, serviço `web` → **Advanced** → confirme que **Health Check**
+   não está desativado manualmente (o passo 5 acima manda desativar isso só
+   no `migrate`, que sai com código 0 de propósito — nunca no `web`).
+4. Confirme em **Docker Compose Location** que o recurso aponta para
+   `docker-compose.coolify.yml`, não para `docker-compose.yml`/`.prod.yml` —
+   apontando para o arquivo errado, o healthcheck simplesmente não existe
+   naquela definição.
+
 ### Backup no Coolify
 
 O PostgreSQL deste compose é um container do stack, então **não entra no backup

@@ -12,6 +12,7 @@ import {
 } from '@content-pilot/db';
 import { jobLimitsSchema, runPipeline, type PipelineResult } from '@content-pilot/core';
 import {
+  preflightLlmTasks,
   resolveLlmProvider,
   resolveSearchClient,
   resolveTemplateById,
@@ -101,6 +102,19 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
       resolveTaskModel(db, workspaceId, 'generate'),
       resolveTaskModel(db, workspaceId, 'verify'),
     ]);
+
+    // Check-up de credenciais ANTES de gastar WP/busca/IA (grátis).
+    const preflightIssues = await preflightLlmTasks(db, workspaceId, [
+      { ...generateModel, label: 'Geração' },
+      { ...verifyModel, label: 'Verificação' },
+    ]);
+    if (preflightIssues.length > 0) {
+      const reason = preflightIssues.join(' ');
+      log(`check-up de credenciais falhou — nada gasto: ${reason}`);
+      await record('failed', {}, { error: reason });
+      return;
+    }
+
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveTemplateById(db, job.templateId, workspaceId),

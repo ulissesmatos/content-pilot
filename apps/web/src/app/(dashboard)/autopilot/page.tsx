@@ -143,7 +143,7 @@ export default async function AutopilotPage() {
       </PageHeader>
 
       {configs.length > 0 ? (
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <div className="mb-6 grid grid-cols-3 gap-2 sm:gap-4">
           <StatCard title={t('statPendingReview')} value={String(pendingReview)} icon={ClipboardCheck} />
           <StatCard title={t('statBriefsMonth')} value={String(createdBriefs)} icon={FileText} />
           <StatCard title={t('statCostMonth')} value={money.format(totalMonthCost)} icon={CircleDollarSign} />
@@ -153,7 +153,63 @@ export default async function AutopilotPage() {
       {configs.length === 0 ? (
         <EmptyState icon={Sparkles} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (
-        <Card className="py-0">
+        <>
+          {/* Mobile: lista de cards — a tabela de 7 colunas não cabe na tela e obriga scroll lateral pra alcançar as ações. */}
+          <div className="grid gap-3 md:hidden">
+            {configs.map(({ config, siteName }) => {
+              const limits = autopilotLimitsSchema.parse(config.limits ?? {});
+              const cost = costByConfig.get(config.id) ?? 0;
+              const pct = Math.min(100, Math.round((cost / limits.monthlyBudgetUsd) * 100));
+              return (
+                <Card key={config.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{config.name}</div>
+                      <p className="text-muted-foreground mt-0.5 truncate text-xs">{config.seedTopics.join(', ')}</p>
+                    </div>
+                    <AutopilotEnabledSwitch id={config.id} enabled={config.enabled} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <Badge variant="secondary" className="border-transparent">
+                      {config.autoQueue
+                        ? t('modeAuto', { publishMode: publishLabel(config.publishMode) })
+                        : t('modeReview')}
+                    </Badge>
+                    <span className="text-muted-foreground">{siteName}</span>
+                  </div>
+                  <div className="mt-3">
+                    <div className="flex items-baseline justify-between text-sm">
+                      <span>{money.format(cost)}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {t('budgetOf', { budget: money.format(limits.monthlyBudgetUsd) })}
+                      </span>
+                    </div>
+                    <div className="bg-muted mt-1 h-1.5 w-full overflow-hidden rounded-full">
+                      <div
+                        className={`h-full rounded-full ${pct >= 100 ? 'bg-destructive' : pct >= 80 ? 'bg-amber-500' : 'bg-primary'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground mt-2 text-xs">
+                    {t('colNextRun')}: {config.enabled && config.nextRunAt ? dateFmt.format(config.nextRunAt) : '—'}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <RunDiscoveryButton id={config.id} />
+                    <EditAutopilotDialog
+                      sites={siteRows}
+                      templates={templateRows}
+                      wordpressCredentials={wpCredentialRows}
+                      initial={toInitial(config)}
+                    />
+                    <DeleteAutopilotButton id={config.id} name={config.name} />
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          <Card className="hidden py-0 md:block">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
@@ -227,10 +283,44 @@ export default async function AutopilotPage() {
             </Table>
           </CardContent>
         </Card>
+        </>
       )}
 
       {feed.length > 0 ? (
-        <Card className="mt-6 py-0">
+        <>
+          {/* Mobile: mesmo motivo do bloco acima — 5 colunas não cabem na tela. */}
+          <div className="mt-6 grid gap-3 md:hidden">
+            <h2 className="text-base font-semibold">{t('discoveredTitle')}</h2>
+            {feed.map(({ topic, briefStatus }) => (
+              <Card key={topic.id} className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{topic.suggestedTitle || topic.topic}</div>
+                    {topic.discardReason ? (
+                      <p className="text-muted-foreground mt-0.5 text-xs">{topic.discardReason}</p>
+                    ) : topic.briefId ? (
+                      <Link href="/briefs" className="text-muted-foreground mt-0.5 text-xs hover:underline">
+                        {t('becameBrief')}
+                        {briefStatus ? ` · ${briefStatus}` : ''}
+                      </Link>
+                    ) : null}
+                  </div>
+                  <StatusBadge status={topic.status} />
+                </div>
+                <div className="text-muted-foreground mt-2 flex items-center justify-between text-xs">
+                  <span>{typeLabel(topic.contentType)}</span>
+                  <span>{dateFmt.format(topic.createdAt)}</span>
+                </div>
+                {topic.status === 'pending' ? (
+                  <div className="mt-3">
+                    <TopicRowActions topicId={topic.id} topic={topic.suggestedTitle || topic.topic} />
+                  </div>
+                ) : null}
+              </Card>
+            ))}
+          </div>
+
+          <Card className="mt-6 hidden py-0 md:block">
           <CardHeader className="px-6 pt-5 pb-0">
             <CardTitle className="text-base">{t('discoveredTitle')}</CardTitle>
           </CardHeader>
@@ -275,6 +365,7 @@ export default async function AutopilotPage() {
             </Table>
           </CardContent>
         </Card>
+        </>
       ) : null}
     </>
   );

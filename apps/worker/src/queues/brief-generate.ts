@@ -10,6 +10,7 @@ import {
   suggestedInlineCount,
 } from '@content-pilot/core';
 import {
+  preflightLlmTasks,
   resolveImageGenProvider,
   resolveLlmProvider,
   resolveSearchClient,
@@ -91,6 +92,20 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       resolveTaskModel(db, workspaceId, 'generate'),
       resolveTaskModel(db, workspaceId, 'verify'),
     ]);
+
+    // Check-up de credenciais ANTES de gastar WP/busca/IA: confere que os
+    // modelos configurados existem na conta do provedor (grátis).
+    const preflightIssues = await preflightLlmTasks(db, workspaceId, [
+      { ...generateModel, label: 'Geração' },
+      { ...verifyModel, label: 'Verificação' },
+    ]);
+    if (preflightIssues.length > 0) {
+      const reason = preflightIssues.join(' ');
+      log(`check-up de credenciais falhou — nada gasto: ${reason}`);
+      await fail(reason);
+      return;
+    }
+
     const [wp, template, search, llmGenerate, llmVerify] = await Promise.all([
       resolveWordPressAdapter(db, site),
       resolveTemplateById(db, brief.templateId, workspaceId),
@@ -211,28 +226,37 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     let finalHtml = result.finalHtml;
     if (template.config.images.enabled) {
       const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
-      const [illustrateModel, imageGen] = await Promise.all([
-        resolveTaskModel(db, workspaceId, 'illustrate'),
-        resolveImageGenProvider(db, workspaceId),
+      const illustrateModel = await resolveTaskModel(db, workspaceId, 'illustrate');
+      const illustrateIssues = await preflightLlmTasks(db, workspaceId, [
+        { ...illustrateModel, label: 'Ilustração' },
       ]);
-      const llmVision = await resolveLlmProvider(db, workspaceId, illustrateModel);
-      const { mediaId, inlineImages, llmCalls } = await illustratePost({
-        wp,
-        llmVision,
-        topic: brief.topic,
-        keywords: brief.keywords ?? [],
-        language: brief.language,
-        candidates: template.config.images.candidates,
-        inlineCount,
-        search,
-        webSearch: template.config.images.webSearch,
-        imageGen: imageGen ?? undefined,
-        checkBudget,
-        log,
-      });
-      featuredMediaId = mediaId ?? undefined;
-      if (inlineImages.length > 0) finalHtml = injectInlineImages(finalHtml, inlineImages);
-      result.llmCalls.push(...llmCalls); // registra os tokens da visão no run
+      if (illustrateIssues.length > 0) {
+        // post sem capa é aceitável (fail-safe já existente); abortar o post
+        // inteiro por causa da imagem, não.
+        log(`check-up de credenciais falhou — post segue sem imagem: ${illustrateIssues.join(' ')}`);
+      } else {
+        const [llmVision, imageGen] = await Promise.all([
+          resolveLlmProvider(db, workspaceId, illustrateModel),
+          resolveImageGenProvider(db, workspaceId),
+        ]);
+        const { mediaId, inlineImages, llmCalls } = await illustratePost({
+          wp,
+          llmVision,
+          topic: brief.topic,
+          keywords: brief.keywords ?? [],
+          language: brief.language,
+          candidates: template.config.images.candidates,
+          inlineCount,
+          search,
+          webSearch: template.config.images.webSearch,
+          imageGen: imageGen ?? undefined,
+          checkBudget,
+          log,
+        });
+        featuredMediaId = mediaId ?? undefined;
+        if (inlineImages.length > 0) finalHtml = injectInlineImages(finalHtml, inlineImages);
+        result.llmCalls.push(...llmCalls); // registra os tokens da visão no run
+      }
     }
 
     const created = await wp.createPost({

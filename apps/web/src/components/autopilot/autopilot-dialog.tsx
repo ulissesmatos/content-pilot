@@ -20,6 +20,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { LANGUAGES } from '@/lib/languages';
 
 interface Option {
   id: string;
@@ -68,6 +69,7 @@ export function AutopilotDialog({
   const [extraTemplates, setExtraTemplates] = useState<Option[]>([]);
   const [siteId, setSiteId] = useState(initial?.siteId ?? '');
   const [templateId, setTemplateId] = useState(initial?.templateId ?? '');
+  const [language, setLanguage] = useState(initial?.language ?? 'pt-BR');
   const [cronPreset, setCronPreset] = useState<string>(initial?.scheduleCron ?? CRON_PRESETS[1].value);
   const [allowedTypes, setAllowedTypes] = useState<ContentType[]>(initial?.allowedTypes ?? []);
   const [autoQueue, setAutoQueue] = useState(initial?.autoQueue ?? false);
@@ -94,7 +96,7 @@ export function AutopilotDialog({
           siteId,
           templateId,
           seedTopics: formData.get('seedTopics'),
-          language: String(formData.get('language') ?? '').trim() || 'pt-BR',
+          language,
           scheduleCron: cronPreset,
           timezone: 'America/Sao_Paulo',
           autoQueue,
@@ -197,6 +199,20 @@ export function AutopilotDialog({
               </Field>
             </div>
             <TemplateChips chips={templateOptions.find((t) => t.id === templateId)?.summary} />
+            <Field label="Idioma dos artigos" hint="Descoberta e geração saem inteiramente nesse idioma.">
+              <Select value={language} onValueChange={setLanguage}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LANGUAGES.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </FormSection>
 
           <FormSection

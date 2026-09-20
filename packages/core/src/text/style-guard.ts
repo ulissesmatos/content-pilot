@@ -283,3 +283,29 @@ export function buildStyleInstructions(policy: StylePolicy, language: string): s
     ? `\n\nREGRAS DE ESTILO (têm prioridade sobre qualquer instrução anterior):\n${lines.map((l) => `- ${l}`).join('\n')}`
     : `\n\nSTYLE RULES (these override any earlier instruction):\n${lines.map((l) => `- ${l}`).join('\n')}`;
 }
+
+export const LANGUAGE_NAMES: Record<string, string> = {
+  'pt-BR': 'português do Brasil (pt-BR)',
+  pt: 'português (pt)',
+  'en-US': 'English (en-US)',
+  en: 'English (en)',
+  'es-ES': 'español de España (es-ES)',
+  es: 'español (es)',
+};
+
+/**
+ * Instrução de idioma anexada em runtime, igual às regras de estilo acima.
+ *
+ * Necessária porque o template pode não ter um prompt traduzido pro idioma
+ * pedido: `promptsForLanguage` cai no `defaultLanguage` do template nesse
+ * caso, e sem esta instrução explícita o texto sairia no idioma do prompt
+ * (normalmente pt-BR), não no idioma que o autopilot/job pediu.
+ *
+ * Bilíngue de propósito: a mesma instrução escrita em português E no idioma
+ * alvo garante que o modelo a entenda não importa qual idioma ele "prefira"
+ * internamente ao processar o resto do prompt.
+ */
+export function buildLanguageInstruction(language: string): string {
+  const name = LANGUAGE_NAMES[language] ?? language;
+  return `\n\nIDIOMA OBRIGATÓRIO / REQUIRED LANGUAGE: escreva TODO o conteúdo (título, corpo do artigo, meta descrição, resumo) em ${name}. Write the ENTIRE output (title, article body, meta description, summary) in ${name}. Mesmo que as fontes de pesquisa estejam em outro idioma, traduza as informações relevantes — even if the research sources are in another language, translate the relevant information. Never mix languages in the output.`;
+}

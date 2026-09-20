@@ -3,7 +3,7 @@ import { LlmError } from '../llm/client';
 import type { LlmProvider } from '../llm/types';
 import type { SearchClient } from '../search/tavily';
 import { monthYear, todayLong } from '../i18n/dates';
-import { rewriteDashesInText, stripDecorativeDates } from '../text/style-guard';
+import { LANGUAGE_NAMES, rewriteDashesInText, stripDecorativeDates } from '../text/style-guard';
 import { stripDiacritics } from '../i18n/slug';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import {
@@ -216,6 +216,7 @@ RULES:
 - Specific, searchable topics (not "gaming news" but "what changes in [game X]'s friends system").${dateRule(input, false)}
 - Prefer what shows strong signal in the sources (real audience interest).
 - Do not repeat the same subject across candidates.
+- Write "topic", "angle" and "suggestedTitle" in ${LANGUAGE_NAMES[language] ?? language} — even if the sources above are in another language.
 
 RESPOND EXACTLY IN THIS JSON FORMAT (use these field names, no markdown):
 {

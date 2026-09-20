@@ -15,12 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-
-const LANGUAGES = [
-  { value: 'pt-BR', label: 'Português (Brasil)' },
-  { value: 'en-US', label: 'English (US)' },
-  { value: 'es-ES', label: 'Español (España)' },
-];
+import { LANGUAGES } from '@/lib/languages';
 
 interface CredentialOption {
   id: string;

@@ -70,6 +70,9 @@ importers:
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
+      sharp:
+        specifier: 0.35.4
+        version: 0.35.4(@types/node@20.19.43)
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -162,6 +165,9 @@ importers:
       ipaddr.js:
         specifier: ^2.5.0
         version: 2.5.0
+      sharp:
+        specifier: 0.35.4
+        version: 0.35.4(@types/node@20.19.43)
       undici:
         specifier: ^7.29.1
         version: 7.29.1
@@ -8828,7 +8834,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 20.19.43
-    optional: true
 
   sharp@0.35.4(@types/node@26.1.0):
     dependencies:

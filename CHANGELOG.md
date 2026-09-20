@@ -18,6 +18,47 @@ como pacote npm.
 
 ## [Unreleased]
 
+### Added
+- Troca de imagem direto na prévia do artigo (`/briefs/[id]`): qualquer imagem do
+  texto, ou a capa, pode ser substituída por uma do computador, arrastando o
+  arquivo por cima dela, colando (Ctrl+V com a imagem em foco), escolhendo um
+  arquivo ou informando o endereço de uma imagem da web (também vale arrastar
+  uma imagem de outra aba). A capa que faltou ganha "Enviar capa".
+- Toda imagem enviada passa pela compactação e vira WebP: a capa é recortada
+  no tamanho exato do template, a imagem do texto só é reduzida (nunca esticada
+  nem recortada), a orientação EXIF é aplicada e os metadados são removidos.
+  Recusa SVG, arquivo acima de 15 MB, imagem minúscula e o que não é imagem.
+- SEO da imagem no mesmo diálogo: texto alternativo (com contador), título do
+  item na biblioteca de mídia, legenda e nome do arquivo. Também dá para
+  ajustar só o SEO de uma imagem existente, sem trocar o arquivo. A legenda
+  antiga (atribuição da imagem que saiu) é limpa ao trocar.
+- Edição básica do texto na prévia: parágrafos, títulos de seção, itens de
+  lista e o título do artigo, com negrito, itálico e links preservados. Se o
+  WordPress mudou algum trecho depois que a tela foi aberta, nada é gravado
+  (evita sobrescrever o trabalho de outra pessoa). Enter não cria parágrafo e a
+  colagem entra como texto puro.
+- Origem "Enviada por você" no relatório de imagens do artigo.
+- `updateMedia` no adaptador do WordPress (alt, legenda e título do anexo).
+
+### Changed
+- Datas e horas do painel passam a ser mostradas em UTC-3
+  (`America/Sao_Paulo`); o banco continua guardando em UTC. A descoberta
+  agendada para as 7h deixa de aparecer como 10h. O "hoje" e o mês usados nos
+  prompts, nas buscas e no widget de códigos também seguem UTC-3: entre 21h e
+  meia-noite o servidor em UTC já estava no dia seguinte.
+- A conversão de imagem para WebP saiu do worker e foi para o `core`, para o
+  painel e o worker usarem exatamente a mesma regra. O painel passou a depender
+  do `sharp` (mesma versão do worker).
+
+### Fixed
+- O "último uso" das credenciais em `/credentials` só era gravado ao testar a
+  conexão de um site. Agora é gravado quando o provedor aceita uma chamada de
+  verdade (IA, busca Tavily, WordPress, geração de imagem, listagem de modelos
+  com a chave do usuário). Chamada que falha, ou busca que devolve erro, não
+  conta; no máximo uma gravação por minuto por credencial.
+- O rodapé fixo dos modais (botão Salvar) deixava o conteúdo vazar por baixo
+  dele, principalmente em janelas baixas.
+
 ## [0.3.0] - 2026-09-20
 
 ### Added

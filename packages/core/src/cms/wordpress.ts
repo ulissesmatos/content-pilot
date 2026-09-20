@@ -179,13 +179,20 @@ export class WordPressAdapter implements CmsAdapter {
       { timeoutMs: 60_000, retries: 2, retryDelayMs: 3_000, fetchImpl: publicFetch, ...this.fetchOpts },
     );
     const media = (await res.json()) as { id: number; source_url: string };
-    if (input.alt || input.caption) {
-      await this.request(`/media/${media.id}`, {
-        method: 'POST',
-        body: JSON.stringify({ alt_text: input.alt ?? '', caption: input.caption ?? '' }),
-      });
+    if (input.alt || input.caption || input.title) {
+      await this.updateMedia(media.id, { alt: input.alt, caption: input.caption, title: input.title });
     }
     return { id: media.id, sourceUrl: media.source_url };
+  }
+
+  /** Só os campos informados são alterados; `''` limpa o campo. */
+  async updateMedia(id: number, patch: { alt?: string; caption?: string; title?: string }): Promise<void> {
+    const body: Record<string, string> = {};
+    if (patch.alt !== undefined) body.alt_text = patch.alt;
+    if (patch.caption !== undefined) body.caption = patch.caption;
+    if (patch.title !== undefined) body.title = patch.title;
+    if (Object.keys(body).length === 0) return;
+    await this.request(`/media/${id}`, { method: 'POST', body: JSON.stringify(body) });
   }
 
   /**

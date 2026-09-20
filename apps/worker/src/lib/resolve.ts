@@ -21,6 +21,7 @@ import {
   HttpLlmProvider,
   OpenAiImageGenClient,
   TavilyClient,
+  trackUsage,
   WordPressAdapter,
   parseTemplateConfig,
   type CatalogModel,
@@ -31,6 +32,7 @@ import {
   type TemplateConfig,
   type WordPressCredentials,
 } from '@content-pilot/core';
+import { touchCredential } from './credential-usage';
 import { decryptSecret } from './vault';
 
 /** Resolução de site/credenciais/template a partir do banco — usada pelo CLI e pelas filas. */
@@ -56,7 +58,8 @@ export async function resolveWordPressAdapter(db: Db, site: typeof sites.$inferS
     .limit(1);
   if (!cred) throw new Error('Credencial do site não encontrada.');
   const wpCreds = decryptSecret<WordPressCredentials>(cred.ciphertext, site.workspaceId, cred.id);
-  return new WordPressAdapter(site.baseUrl, wpCreds);
+  // o uso é registrado quando o WordPress respondeu, não quando a credencial foi carregada
+  return trackUsage(new WordPressAdapter(site.baseUrl, wpCreds), () => void touchCredential(db, cred.id));
 }
 
 export async function resolveTemplate(db: Db, workspaceId: string, slugOrId: string): Promise<{ id: string; slug: string; config: TemplateConfig }> {
@@ -161,7 +164,10 @@ function decryptApiKey(cred: { ciphertext: string; workspaceId: string | null; i
 export async function resolveSearchClient(db: Db, workspaceId: string): Promise<SearchClient> {
   const cred = await firstCredentialOfType(db, workspaceId, 'tavily');
   if (!cred) throw new Error('Nenhuma credencial Tavily disponível — cadastre sua própria chave em /credentials.');
-  return new TavilyClient(decryptApiKey(cred));
+  return trackUsage(new TavilyClient(decryptApiKey(cred)), () => void touchCredential(db, cred.id), {
+    // a busca devolve { results: [], error } em vez de lançar: com erro, a chave não foi usada de fato
+    ok: (r) => !(r && typeof r === 'object' && 'error' in r && (r as { error?: unknown }).error),
+  });
 }
 
 export interface LlmTaskConfig {
@@ -190,6 +196,8 @@ interface ResolvedLlmCredential {
   provider: LlmProviderName;
   model: string;
   apiKey: string;
+  /** Para registrar o último uso real quando o provedor responder. */
+  credentialId: string;
 }
 
 /**
@@ -211,7 +219,7 @@ async function resolveByokLlmCredential(
       );
     }
     const fixed = normalizeProviderModel(override.provider, override.model);
-    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
+    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred), credentialId: cred.id };
   }
 
   const fallback = await preferredOwnLlmCredential(db, workspaceId);
@@ -219,7 +227,7 @@ async function resolveByokLlmCredential(
     throw new Error('Nenhuma credencial BYOK de IA disponível — cadastre uma chave OpenAI, Anthropic ou OpenRouter em /credentials.');
   }
   const fixed = normalizeProviderModel(fallback.provider, byokDefaultModel(fallback.provider, task.purpose));
-  return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(fallback.cred) };
+  return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(fallback.cred), credentialId: fallback.cred.id };
 }
 
 async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<ResolvedLlmCredential> {
@@ -241,7 +249,7 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
     if (!cred) throw new Error('Credencial indisponível para este workspace/provedor.');
     if (cred.type !== task.provider) throw new Error('Credencial indisponível para este workspace/provedor.');
     const fixed = normalizeProviderModel(task.provider, task.model);
-    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
+    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred), credentialId: cred.id };
   }
 
   const override = await getWorkspaceAiSettings(db, workspaceId);
@@ -255,7 +263,7 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
     const systemCredential = await platformCredentialOfType(db, task.provider);
     if (systemCredential) {
       const fixed = normalizeProviderModel(task.provider, task.model);
-      return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential) };
+      return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential), credentialId: systemCredential.id };
     }
   }
 
@@ -270,7 +278,7 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
       const systemCredential = await platformCredentialOfType(db, task.provider);
       if (systemCredential) {
         const fixed = normalizeProviderModel(task.provider, task.model);
-        return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential) };
+        return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential), credentialId: systemCredential.id };
       }
     }
     throw err;
@@ -278,14 +286,17 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
 }
 
 export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
-  const { provider, model, apiKey } = await resolveLlmCredential(db, workspaceId, task);
-  return new HttpLlmProvider({
-    provider,
-    model,
-    apiKey,
-    maxTokensCap: task.maxTokens,
-    openrouter: provider === 'openrouter' ? { appName: 'Content Pilot' } : undefined,
-  });
+  const { provider, model, apiKey, credentialId } = await resolveLlmCredential(db, workspaceId, task);
+  return trackUsage(
+    new HttpLlmProvider({
+      provider,
+      model,
+      apiKey,
+      maxTokensCap: task.maxTokens,
+      openrouter: provider === 'openrouter' ? { appName: 'Content Pilot' } : undefined,
+    }),
+    () => void touchCredential(db, credentialId),
+  );
 }
 
 /** Uma etapa nomeada para o preflight — o nome é o que aparece na mensagem de erro. */
@@ -329,6 +340,8 @@ export async function preflightLlmTasks(
             : resolved.provider === 'anthropic'
               ? await fetchAnthropicModels(resolved.apiKey, { timeoutMs: 10_000 })
               : await fetchOpenRouterModels({ timeoutMs: 10_000 }); // pública — não valida a chave, só o id do modelo
+        // a listagem com a chave do usuário é um uso real dela (a do OpenRouter é pública e não conta)
+        if (resolved.provider !== 'openrouter') void touchCredential(db, resolved.credentialId);
       } catch (err) {
         if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
           issues.push(`${task.label}: chave ${resolved.provider} rejeitada pelo provedor (${err.status}) — verifique em /credentials.`);
@@ -362,5 +375,8 @@ export async function resolveImageGenProvider(db: Db, workspaceId: string): Prom
       : (await ownCredentialOfType(db, workspaceId, 'openai')) ??
         (canUseSystem ? await platformCredentialOfType(db, 'openai') : null);
   if (!cred) return null;
-  return new OpenAiImageGenClient(decryptApiKey(cred), settings.imageGenModel);
+  return trackUsage(new OpenAiImageGenClient(decryptApiKey(cred), settings.imageGenModel), () => void touchCredential(db, cred.id), {
+    // sem imagem devolvida a chave não foi usada com sucesso
+    ok: (r) => r !== null,
+  });
 }

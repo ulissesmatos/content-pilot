@@ -1,5 +1,5 @@
 import { parseTweet, parseYoutubeId } from '../embeds/parse';
-import { gutenbergImageBlock, type InlineImage } from './inline-images';
+import { gutenbergImageBlock, MANAGED_RANGE, type InlineImage } from './inline-images';
 
 /**
  * O artigo do WordPress como uma lista de blocos que a tela de preview sabe
@@ -114,4 +114,141 @@ export function replaceImageBlock(html: string, mediaId: number, next: InlineIma
     return gutenbergImageBlock(next).trim();
   });
   return { html: out, replaced };
+}
+
+/**
+ * Ajusta só o SEO de uma imagem que já está no post (alt e legenda), mantendo a mesma URL e o mesmo
+ * anexo. O bloco inteiro é reescrito para o `alt` e o `<figcaption>` nunca ficarem dessincronizados.
+ */
+export function updateImageBlockSeo(
+  html: string,
+  mediaId: number,
+  seo: { alt: string; caption: string },
+): { html: string; replaced: boolean; url: string | null } {
+  let replaced = false;
+  let url: string | null = null;
+  const out = html.replace(BLOCK, (whole, kind: string, rawAttrs: string | undefined, body: string) => {
+    if (kind !== 'image' || replaced) return whole;
+    const attrs = parseAttrs(rawAttrs);
+    if (imageBlockMediaId(attrs, body) !== mediaId) return whole;
+    const seg = imageSegment(attrs, body);
+    if (!seg || seg.kind !== 'image') return whole;
+    replaced = true;
+    url = seg.url;
+    return gutenbergImageBlock({ url: seg.url, alt: seo.alt, caption: seo.caption, mediaId }).trim();
+  });
+  return { html: out, replaced, url };
+}
+
+// ---------- edição básica do texto ----------
+
+/** Um trecho de texto do artigo que pode ser editado: parágrafo, título de seção ou item de lista. */
+export interface EditableText {
+  /** Posição entre os trechos editáveis, na ordem do HTML. É a identidade que a tela e o servidor usam. */
+  index: number;
+  tag: 'p' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'li';
+  /** Onde começa a tag de abertura, e onde termina (logo após o `>`). */
+  openStart: number;
+  openEnd: number;
+  /** O conteúdo de dentro (entre a abertura e o fechamento), como está no HTML. */
+  inner: string;
+  innerStart: number;
+  innerEnd: number;
+}
+
+const TEXT_ELEMENT = /<(p|h[2-6]|li)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
+/** Dentro destes blocos nada é texto do artigo: imagem, embed, HTML solto, código, tabela, shortcode. */
+const NON_TEXT_BLOCK = /<!-- wp:(image|embed|html|code|preformatted|verse|shortcode|table)(?: \{[\s\S]*?\})? -->[\s\S]*?<!-- \/wp:\1 -->/g;
+/** Conteúdo com estrutura de bloco dentro: não é um trecho simples de texto. */
+const HAS_BLOCK_CHILD = /<(?:p|div|ul|ol|li|h[1-6]|table|figure|blockquote|pre)\b/i;
+
+/**
+ * Os trechos de texto que a tela deixa editar, na ordem em que aparecem. Ficam de fora o que não é
+ * texto simples (imagem, embed, código, tabela), o bloco gerenciado pelo sistema (widget que é
+ * regerado) e elementos com estrutura dentro (lista dentro de lista).
+ */
+export function findEditableTexts(html: string): EditableText[] {
+  const excluded: Array<[number, number]> = [];
+  for (const m of html.matchAll(NON_TEXT_BLOCK)) excluded.push([m.index!, m.index! + m[0]!.length]);
+  for (const m of html.matchAll(MANAGED_RANGE)) excluded.push([m.index!, m.index! + m[0]!.length]);
+  const inExcluded = (pos: number) => excluded.some(([s, e]) => pos >= s && pos < e);
+
+  const out: EditableText[] = [];
+  for (const m of html.matchAll(TEXT_ELEMENT)) {
+    if (inExcluded(m.index!)) continue;
+    const inner = m[3]!;
+    if (HAS_BLOCK_CHILD.test(inner)) continue;
+    const openEnd = m.index! + 1 + m[1]!.length + m[2]!.length + 1;
+    out.push({
+      index: out.length,
+      tag: m[1]!.toLowerCase() as EditableText['tag'],
+      openStart: m.index!,
+      openEnd,
+      inner,
+      innerStart: openEnd,
+      innerEnd: openEnd + inner.length,
+    });
+  }
+  return out;
+}
+
+/** Texto puro de um trecho: sem tags, entidades comuns decodificadas e espaços colapsados. */
+export function plainText(inner: string): string {
+  // tag de texto (negrito, link) nao separa palavras; so a quebra de linha vira espaco
+  return decodeEntities(inner.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Para comparar o texto que o navegador viu com o do HTML: sem espaco nenhum, que e o que mais varia. */
+const compact = (text: string) => text.replace(/\s+/g, '');
+
+/**
+ * Marca cada trecho editável com `data-edit-index`, para a tela saber qual trecho do HTML cada
+ * elemento desenhado representa. É o mesmo índice que `applyTextEdits` usa ao salvar.
+ */
+export function markEditableTexts(html: string): string {
+  const items = findEditableTexts(html);
+  let out = html;
+  for (const it of [...items].reverse()) {
+    // logo antes do `>` da abertura
+    out = out.slice(0, it.openEnd - 1) + ` data-edit-index="${it.index}"` + out.slice(it.openEnd - 1);
+  }
+  return out;
+}
+
+export interface TextEdit {
+  index: number;
+  /** O texto puro do trecho como o usuário o viu ao começar: se o WordPress mudou nesse meio tempo, não se sobrescreve. */
+  beforeText: string;
+  /** O conteúdo novo, JÁ sanitizado por quem chama (só marcação de texto). */
+  afterHtml: string;
+}
+
+export type ApplyEditsResult =
+  | { ok: true; html: string; changed: number }
+  | { ok: false; reason: 'conflict' | 'missing' | 'empty'; index: number };
+
+/**
+ * Aplica as edições ao HTML do post. Antes de tocar em qualquer trecho confere que ele continua
+ * como o usuário o viu: se alguém mudou aquele parágrafo no WordPress, a edição inteira é recusada
+ * em vez de sobrescrever o trabalho dos outros. Tudo ou nada.
+ */
+export function applyTextEdits(html: string, edits: TextEdit[]): ApplyEditsResult {
+  const items = findEditableTexts(html);
+  const byIndex = new Map(items.map((i) => [i.index, i]));
+  const planned: Array<{ item: EditableText; after: string }> = [];
+
+  for (const e of edits) {
+    const item = byIndex.get(e.index);
+    if (!item) return { ok: false, reason: 'missing', index: e.index };
+    if (compact(plainText(item.inner)) !== compact(e.beforeText.replace(/\u00a0/g, ' '))) return { ok: false, reason: 'conflict', index: e.index };
+    const after = e.afterHtml.trim();
+    if (!plainText(after)) return { ok: false, reason: 'empty', index: e.index };
+    if (after !== item.inner.trim()) planned.push({ item, after });
+  }
+
+  let out = html;
+  for (const { item, after } of planned.sort((a, b) => b.item.innerStart - a.item.innerStart)) {
+    out = out.slice(0, item.innerStart) + after + out.slice(item.innerEnd);
+  }
+  return { ok: true, html: out, changed: planned.length };
 }

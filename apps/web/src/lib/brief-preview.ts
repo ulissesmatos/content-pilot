@@ -1,7 +1,9 @@
 import { and, briefs, contentTemplates, eq, getTenantDb, sites } from '@content-pilot/db';
 import {
+  markEditableTexts,
   parseEditorialReport,
   parseImageReport,
+  parseTemplateConfig,
   splitArticle,
   type ArticleSegment,
   type EditorialReport,
@@ -27,12 +29,16 @@ export interface BriefPreview {
     wpStatus: string | null;
     /** O post tem imagem destacada no WordPress agora (fonte da verdade sobre a capa). */
     hasCover: boolean;
+    /** Só dá para editar imagem do texto e o texto quando o WordPress devolveu o conteúdo em blocos. */
+    editable: boolean;
     segments: ArticleSegment[];
   } | null;
   /** Por que o texto não foi carregado; os relatórios continuam disponíveis. */
   postError: string | null;
   images: ImageReport;
   editorial: EditorialReport | null;
+  /** Tamanho final das imagens do template: a tela diz o que vai acontecer com a imagem enviada. */
+  imageSizes: { cover: { width: number; height: number }; inline: { width: number; height: number } };
 }
 
 const isHttp = (u: string) => /^https?:\/\//i.test(u);
@@ -58,7 +64,7 @@ export function toSafeSegments(segments: ArticleSegment[]): ArticleSegment[] {
 export async function loadBriefPreview(workspaceId: string, briefId: string): Promise<BriefPreview | null> {
   const db = getTenantDb(workspaceId);
   const [row] = await db
-    .select({ brief: briefs, siteName: sites.name, templateName: contentTemplates.name })
+    .select({ brief: briefs, siteName: sites.name, templateName: contentTemplates.name, templateConfig: contentTemplates.config })
     .from(briefs)
     .innerJoin(sites, eq(briefs.siteId, sites.id))
     .innerJoin(contentTemplates, eq(briefs.templateId, contentTemplates.id))
@@ -68,6 +74,15 @@ export async function loadBriefPreview(workspaceId: string, briefId: string): Pr
 
   const { brief } = row;
   const images = parseImageReport(brief.imageReport);
+  const imageSizes = (() => {
+    try {
+      const cfg = parseTemplateConfig(row.templateConfig).images;
+      return { cover: cfg.cover, inline: cfg.inline };
+    } catch {
+      // template com config torto: o padrão do sistema, para a tela não quebrar
+      return { cover: { width: 1280, height: 720 }, inline: { width: 1280, height: 720 } };
+    }
+  })();
   const editorial = parseEditorialReport(brief.editorialReport);
 
   let post: BriefPreview['post'] = null;
@@ -85,12 +100,14 @@ export async function loadBriefPreview(workspaceId: string, briefId: string): Pr
         link: p.link,
         wpStatus: p.status ?? null,
         hasCover: Boolean(p.featuredMediaId),
-        segments: toSafeSegments(splitArticle(p.contentRaw)),
+        editable: !p.usedRenderedFallback,
+        // cada trecho de texto editável ganha um índice; é o mesmo que o servidor usa ao salvar
+        segments: toSafeSegments(splitArticle(p.usedRenderedFallback ? p.contentRaw : markEditableTexts(p.contentRaw))),
       };
     } catch (err) {
       postError = err instanceof Error ? err.message : String(err);
     }
   }
 
-  return { brief, siteName: row.siteName, templateName: row.templateName, post, postError, images, editorial };
+  return { brief, siteName: row.siteName, templateName: row.templateName, post, postError, images, editorial, imageSizes };
 }

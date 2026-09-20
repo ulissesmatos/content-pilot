@@ -12,7 +12,7 @@ export interface ImageReportItem {
   slotId: string;
   role: 'cover' | 'inline';
   /** Como a imagem foi obtida. */
-  origin: 'search' | 'source' | 'generated';
+  origin: 'search' | 'source' | 'generated' | 'upload';
   /** ID do anexo no WordPress: a identidade da imagem no HTML (`wp-image-ID`). */
   mediaId: number;
   url: string;

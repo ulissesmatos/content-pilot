@@ -106,75 +106,7 @@ export async function prepareCandidate(
   }
 }
 
-export interface FinalFile {
-  data: Uint8Array;
-  mimeType: string;
-  extension: string;
-  width: number;
-  height: number;
-}
-
-export interface ProcessOptions {
-  size: ImageSize;
-  role: 'cover' | 'inline';
-  format: 'webp' | 'original';
-  quality: number;
-  /** Imagem gerada por IA sempre é recortada no tamanho exato: o tamanho foi pedido. */
-  generated: boolean;
-}
-
-const EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-};
-
-/**
- * Arquivo final para o WordPress.
- *
- *  - Gerada por IA: recorte exato até `size`. A API só oferece 1536x1024 e afins;
- *    1280x720 sai daí.
- *  - Capa real: recorte com foco no assunto (`attention`), para todas as capas do
- *    blog terem a mesma proporção na listagem.
- *  - Imagem real do corpo: só reduz até caber, sem recortar (cortar uma foto de
- *    terceiro pode tirar exatamente o que ela mostrava) e sem esticar.
- *
- * WebP por padrão. Em qualquer falha do conversor devolve o original: um post
- * com imagem em JPEG é melhor que um post sem imagem.
- */
-export async function processForUpload(
-  source: { data: Uint8Array; mimeType: string },
-  opts: ProcessOptions,
-): Promise<FinalFile> {
-  const original: FinalFile = {
-    data: source.data,
-    mimeType: source.mimeType,
-    extension: EXT[source.mimeType] ?? 'jpg',
-    width: 0,
-    height: 0,
-  };
-  try {
-    let pipeline = sharp(source.data).rotate();
-    const exact = opts.generated || opts.role === 'cover';
-    pipeline = exact
-      ? pipeline.resize({ width: opts.size.width, height: opts.size.height, fit: 'cover', position: 'attention' })
-      : pipeline.resize({ width: opts.size.width, height: opts.size.height, fit: 'inside', withoutEnlargement: true });
-
-    if (opts.format === 'webp') {
-      const out = await pipeline.webp({ quality: opts.quality, effort: 4 }).toBuffer({ resolveWithObject: true });
-      return { data: out.data, mimeType: 'image/webp', extension: 'webp', width: out.info.width, height: out.info.height };
-    }
-    const out = await pipeline.toBuffer({ resolveWithObject: true });
-    return { ...original, data: out.data, width: out.info.width, height: out.info.height };
-  } catch {
-    return original;
-  }
-}
-
-/** Nome de arquivo estável e legível: aparece na biblioteca de mídia do WordPress. */
-export function imageFilename(base: string, extension: string): string {
-  return `${base}.${extension}`;
-}
+// A conversão para o arquivo final é a mesma que o painel usa para imagens enviadas pelo usuário.
+export { imageFilename, processForUpload, type FinalFile, type ProcessOptions } from '@content-pilot/core';
 
 export type { ChosenImage };

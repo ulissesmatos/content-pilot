@@ -37,6 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { requireSession } from '@/lib/auth';
 import { getWorkspaceReadiness } from '@/lib/readiness';
 import { ReadinessAlert } from '@/components/readiness-alert';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Autopilot' };
 
@@ -137,7 +138,7 @@ export default async function AutopilotPage() {
     )
     .limit(1);
 
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
   const costByConfig = new Map(monthCosts.map((c) => [c.configId, Number(c.cost)]));
   const totalMonthCost = monthCosts.reduce((acc, c) => acc + Number(c.cost), 0);

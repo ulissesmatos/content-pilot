@@ -8,6 +8,7 @@ import { DataList } from '@/components/admin/data-list';
 import { Pager } from '@/components/admin/pager';
 import { Badge } from '@/components/ui/badge';
 import { requireAdmin } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Auditoria' };
 
@@ -27,7 +28,7 @@ export default async function AdminAuditPage({
     getLocale(),
   ]);
   const page = Math.max(1, Number(params.page ?? '1') || 1);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
 
   // Busca uma linha a mais para saber se existe próxima página sem um count().
   const rows = await getDb()

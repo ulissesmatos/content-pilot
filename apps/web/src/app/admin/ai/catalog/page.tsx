@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatCard } from '@/components/stat-card';
 import { requireAdmin } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Modelos disponíveis' };
 
@@ -34,7 +35,7 @@ export default async function AdminCatalogPage({
   const page = Math.max(1, Number(params.page ?? '1') || 1);
   const q = (params.q ?? '').trim().slice(0, 200);
   const onlyVision = params.vision === '1';
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const filters: SQL[] = [eq(modelCatalog.available, true)];
   if (q) filters.push(ilike(modelCatalog.modelId, likeLiteral(q)));

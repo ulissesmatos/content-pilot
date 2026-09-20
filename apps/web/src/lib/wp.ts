@@ -1,6 +1,7 @@
 import { UserFacingError } from '@/lib/errors';
 import { and, credentials, eq, getTenantDb, sites } from '@content-pilot/db';
-import { WordPressAdapter, type WordPressCredentials } from '@content-pilot/core';
+import { trackUsage, WordPressAdapter, type WordPressCredentials } from '@content-pilot/core';
+import { markCredentialUsed } from '@/lib/credential-usage';
 import { decryptSecret } from '@/lib/vault';
 
 /**
@@ -25,5 +26,6 @@ export async function getWordPressForSite(workspaceId: string, siteId: string): 
   if (!cred) throw new UserFacingError('Credencial do site não encontrada.');
 
   const wpCreds = decryptSecret<WordPressCredentials>(cred.ciphertext, workspaceId, cred.id);
-  return new WordPressAdapter(site.baseUrl, wpCreds);
+  // o uso é registrado quando o WordPress respondeu, não quando a credencial foi carregada
+  return trackUsage(new WordPressAdapter(site.baseUrl, wpCreds), () => void markCredentialUsed(workspaceId, cred.id));
 }

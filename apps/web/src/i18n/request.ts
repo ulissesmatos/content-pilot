@@ -1,5 +1,6 @@
 import { cookies, headers } from 'next/headers';
 import { getRequestConfig } from 'next-intl/server';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 import { defaultLocale, isLocale, LOCALE_COOKIE, locales } from './config';
 
 /**
@@ -28,6 +29,8 @@ export default getRequestConfig(async () => {
   const resolved = locale ?? defaultLocale;
   return {
     locale: resolved,
+    // o banco guarda UTC; o painel mostra UTC-3
+    timeZone: APP_TIME_ZONE,
     messages: (await import(`../../messages/${resolved}.json`)).default,
   };
 });

@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/empty-state';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireAdmin } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Admin' };
 
@@ -15,7 +16,7 @@ export default async function AdminOverviewPage() {
   const session = await requireAdmin();
   const db = getDb();
   const [t, locale] = await Promise.all([getTranslations('admin'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const [userStats, wsStats, recent] = await Promise.all([
     db

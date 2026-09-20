@@ -407,6 +407,46 @@ outra. Se a imagem foi removida do post no WordPress, a troca falha **antes** de
 gastar a geração. Sem permissão de edição no WordPress só a capa pode ser trocada,
 porque o HTML renderizado não traz o `wp-image-ID`.
 
+## Editar o artigo no painel: imagens e texto
+
+Na prévia (`/briefs/<id>`), com o artigo já criado no WordPress:
+
+**Trocar uma imagem por uma sua.** Arraste um arquivo (ou uma imagem de outra aba) por cima da
+imagem, ou clique nela e cole (Ctrl+V), ou use "Editar imagem". O envio vai para
+`POST /api/briefs/<id>/image` (multipart; uma server action limita o corpo a 1 MB) e o servidor:
+converte para WebP (`processUploadedImage`, no `core`), envia ao WordPress com alt, título e
+legenda, troca o bloco no post pelo `wp-image-ID` (a capa vira a imagem destacada) e registra a
+origem "upload" no `image_report`. A imagem antiga continua na biblioteca de mídia. Um endereço
+da web é baixado pelo servidor com `publicFetch` (sem redirecionamento e sem rede interna), com
+limite de 15 MB. A conversão exige o `sharp` no painel; ele já vai no build standalone.
+
+**Só o SEO.** Sem escolher imagem nova, o diálogo grava alt, título e legenda no anexo
+(`POST /media/<id>`) e reescreve o bloco da imagem no post.
+
+**Texto.** "Editar texto" liga a edição no lugar de parágrafos, títulos de seção, itens de lista
+e do título do artigo. Cada trecho tem um índice (`data-edit-index`, calculado no HTML bruto do
+WordPress por `findEditableTexts`); ao salvar, o navegador manda só o que mudou, com o texto
+original de cada trecho. Se o WordPress mudou algum deles, o servidor recusa **tudo**
+(`applyTextEdits`). O HTML novo é sanitizado (só negrito, itálico, link, código, sobrescrito) e
+ficam de fora imagem, embed, código, tabela e o bloco gerenciado do sistema. Sem permissão de
+edição no WordPress (só HTML renderizado) as edições ficam desligadas.
+
+As três operações esperam uma troca de imagem por IA em andamento no mesmo artigo (as duas
+leriam o mesmo HTML e uma apagaria a outra) e falham com mensagem clara.
+
+## Fuso horário
+
+O banco guarda tudo em UTC. O painel mostra em UTC-3 (`America/Sao_Paulo`, constante
+`APP_TIME_ZONE` do `core`, usada por `dateTimeFormat` no painel e por `todayLong`/`monthYear`
+nos prompts, buscas e no widget de códigos). Para mudar de fuso é essa constante.
+
+## Último uso das credenciais
+
+`/credentials` mostra `credentials.last_used_at`, gravado quando o provedor aceitou uma chamada
+(`trackUsage` em `core/http/usage-hook.ts`, ligado em `worker/src/lib/resolve.ts`, e
+`markCredentialUsed` no painel). Chamada que falhou, ou busca que devolveu erro, não conta.
+No máximo uma gravação por minuto por credencial e por processo.
+
 ## Configurar imagens, revisão e embeds no template
 
 No editor de template (`/templates/<id>`), duas abas cobrem o que antes só existia no JSON:

@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Execuções' };
 
@@ -29,7 +30,7 @@ function itemsLabel(kind: string, stats: Record<string, number>, expectedItems: 
 export default async function RunsPage() {
   const { workspaceId } = await requireSession();
   const [t, locale] = await Promise.all([getTranslations('runs'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
   const rows = await getTenantDb(workspaceId)
     .select({
       run: runs,

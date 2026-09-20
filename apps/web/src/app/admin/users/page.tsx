@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { requireAdmin } from '@/lib/auth';
 import { isSuperAdmin } from '@/lib/super-admin';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Usuários' };
 
@@ -45,7 +46,7 @@ export default async function AdminUsersPage({
   const status = ['active', 'suspended', 'banned'].includes(params.status ?? '')
     ? (params.status as 'active' | 'suspended' | 'banned')
     : undefined;
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const filters: SQL[] = [isNull(users.deletedAt)];
   if (q) filters.push(ilike(users.email, likeLiteral(q)));

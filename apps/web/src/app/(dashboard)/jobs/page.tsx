@@ -12,6 +12,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
 import { getWorkspaceReadiness } from '@/lib/readiness';
 import { ReadinessAlert } from '@/components/readiness-alert';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Atualizar posts' };
 
@@ -22,7 +23,7 @@ export default async function JobsPage() {
   const readiness = await getWorkspaceReadiness(workspaceId, email);
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('jobs'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const [jobs, siteRows, templateRows, wpCredentialRows] = await Promise.all([
     db

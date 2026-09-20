@@ -6,6 +6,7 @@ import { PlatformKeyCard, type ProviderType } from '@/components/admin/platform-
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { requireAdmin } from '@/lib/auth';
 import { listPlatformCredentials } from '@/lib/platform-secrets';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Chaves da plataforma' };
 
@@ -37,7 +38,7 @@ export default async function AdminAiKeysPage() {
   if (!session.isSuperAdmin) redirect('/admin');
 
   const [rows, locale] = await Promise.all([listPlatformCredentials(), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   const byType = new Map(rows.map((r) => [r.type, r]));
 
   return (

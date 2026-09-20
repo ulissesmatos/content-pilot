@@ -19,13 +19,14 @@ import {
 } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Credenciais' };
 
 export default async function CredentialsPage() {
   const { workspaceId, isSuperAdmin } = await requireSession();
   const [t, locale] = await Promise.all([getTranslations('credentials'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   // Só as credenciais do próprio workspace: as chaves da plataforma são
   // gerenciadas em /admin/ai/keys e não aparecem no painel do cliente.
   const db = getTenantDb(workspaceId);

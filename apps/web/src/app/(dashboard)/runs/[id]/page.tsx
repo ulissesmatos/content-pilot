@@ -27,6 +27,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { requireSession } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Execução' };
 
@@ -60,8 +61,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     getTranslations('status'),
     getLocale(),
   ]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
-  const timeFmt = new Intl.DateTimeFormat(locale, { timeStyle: 'medium' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium' });
+  const timeFmt = dateTimeFormat(locale, { timeStyle: 'medium' });
 
   const [row] = await db
     .select({

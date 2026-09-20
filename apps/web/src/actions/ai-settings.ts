@@ -19,6 +19,7 @@ import {
 } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { markCredentialUsed } from '@/lib/credential-usage';
 import { decryptSecret } from '@/lib/vault';
 
 /**
@@ -71,6 +72,8 @@ export async function listProviderModelsAction(input: unknown): Promise<ActionRe
           : provider === 'anthropic'
             ? await fetchAnthropicModels(apiKey)
             : await fetchOpenRouterModels();
+      // a listagem com a chave do usuário é um uso real dela (a do OpenRouter é pública e não conta)
+      if (provider !== 'openrouter') void markCredentialUsed(workspaceId, cred.id);
       return toOptions(models);
     } catch {
       throw new UserFacingError('Não foi possível buscar os modelos — verifique a chave e tente novamente.');
@@ -85,7 +88,9 @@ export async function listImageGenModelsAction(): Promise<ActionResult<ModelOpti
     if (!cred) throw new UserFacingError('Cadastre uma credencial OpenAI própria antes de ativar a geração de imagem.');
     const apiKey = apiKeyOf(cred, workspaceId);
     try {
-      return toOptions(await fetchOpenAiImageModels(apiKey));
+      const imageModels = await fetchOpenAiImageModels(apiKey);
+      void markCredentialUsed(workspaceId, cred.id);
+      return toOptions(imageModels);
     } catch {
       throw new UserFacingError('Não foi possível buscar os modelos de imagem — verifique a chave e tente novamente.');
     }
@@ -130,6 +135,7 @@ export async function saveAiSettingsAction(input: unknown): Promise<ActionResult
             : data.provider === 'anthropic'
               ? await fetchAnthropicModels(apiKeyOf(cred, workspaceId))
               : await fetchOpenRouterModels();
+        if (data.provider !== 'openrouter') void markCredentialUsed(workspaceId, cred.id);
         if (models.length > 0 && !models.some((m) => m.modelId === model)) {
           throw new UserFacingError(
             `"${model}" não aparece entre os modelos da sua conta ${data.provider === 'openai' ? 'OpenAI' : data.provider === 'anthropic' ? 'Anthropic' : 'OpenRouter'}. Escolha um da lista.`,

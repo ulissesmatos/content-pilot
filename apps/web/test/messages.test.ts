@@ -41,7 +41,7 @@ test('toda chave literal usada nas telas de preview e de acompanhamento existe n
   const missing: string[] = [];
   for (const file of tsxFiles(join(root, 'src'))) {
     const src = readFileSync(file, 'utf8');
-    const ns = /(?:useTranslations|getTranslations)\('(preview|tracker)'\)/.exec(src)?.[1];
+    const ns = /(?:useTranslations|getTranslations)\('(preview|tracker|editor)'\)/.exec(src)?.[1];
     if (!ns) continue;
     for (const m of src.matchAll(/\bt\(\s*'([\w.]+)'/g)) {
       const key = `${ns}.${m[1]}`;
@@ -57,7 +57,7 @@ test('as chaves dinâmicas do preview cobrem todos os valores possíveis', () =>
   for (const messages of [pt, en]) {
     for (const status of REVIEW_STATUSES) assert.ok(get(messages, `preview.reviewStatus.${status}`), `reviewStatus.${status}`);
     for (const kind of ['dull', 'thin', 'ai_tone', 'other']) assert.ok(get(messages, `preview.changeKind.${kind}`), `changeKind.${kind}`);
-    for (const origin of ['generated', 'source', 'search']) assert.ok(get(messages, `preview.origin.${origin}`), `origin.${origin}`);
+    for (const origin of ['generated', 'source', 'search', 'upload']) assert.ok(get(messages, `preview.origin.${origin}`), `origin.${origin}`);
     for (const reason of ['unauthorized', 'not_found', 'network']) assert.ok(get(messages, `tracker.error.${reason}`), `error.${reason}`);
   }
 });

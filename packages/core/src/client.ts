@@ -14,3 +14,4 @@ export {
   type ImageSizePreset,
   type ImageSizeValue,
 } from './templates/policy';
+export { APP_TIME_ZONE } from './i18n/dates';

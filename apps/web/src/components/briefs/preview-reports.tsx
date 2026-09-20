@@ -83,9 +83,9 @@ export function ReviewCard({ report }: { report: EditorialReport | null }) {
 export function ImagesCard({ images }: { images: ImageReport }) {
   const t = useTranslations('preview');
   const locale = useLocale();
-  const counts = { generated: 0, source: 0, search: 0 };
+  const counts = { generated: 0, source: 0, search: 0, upload: 0 };
   for (const i of images.images) counts[i.origin]++;
-  const real = counts.source + counts.search;
+  const real = counts.source + counts.search + counts.upload;
   const summaryParts = [
     real > 0 ? t('imagesReal', { count: real }) : '',
     counts.generated > 0 ? t('imagesGenerated', { count: counts.generated }) : '',

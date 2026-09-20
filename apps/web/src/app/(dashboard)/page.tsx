@@ -11,12 +11,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { isWorkerAlive } from '@/lib/worker-health';
 import { requireSession } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export default async function OverviewPage() {
   const { workspaceId } = await requireSession();
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('overview'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
 
   const now = new Date();

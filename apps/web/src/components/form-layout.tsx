@@ -188,7 +188,7 @@ export function MoreOptions({
 }
 
 /** Rodapé de diálogo que continua visível enquanto o formulário rola. */
-export const stickyFooterClass = 'bg-background sticky bottom-0 -mx-6 -mb-6 border-t px-6 py-4';
+export const stickyFooterClass = 'bg-background sticky -bottom-6 -mx-6 -mb-6 border-t px-6 pt-4 pb-6';
 
 /** Resumo em etiquetas do que um template faz (revisão, imagens, embeds...). */
 export function TemplateChips({ chips }: { chips?: string[] }) {

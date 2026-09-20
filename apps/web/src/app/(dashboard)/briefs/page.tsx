@@ -20,6 +20,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
 import { getWorkspaceReadiness } from '@/lib/readiness';
 import { ReadinessAlert } from '@/components/readiness-alert';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Criar posts' };
 
@@ -28,7 +29,7 @@ export default async function BriefsPage() {
   const readiness = await getWorkspaceReadiness(workspaceId, email);
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('briefs'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const [briefRows, siteRows, templateRows] = await Promise.all([
     db

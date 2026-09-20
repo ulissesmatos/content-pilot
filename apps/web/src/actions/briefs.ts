@@ -207,7 +207,7 @@ export async function listSiteCategoriesAction(input: unknown): Promise<ActionRe
 const regenerateImageSchema = z.object({
   id: z.string().uuid(),
   /** 'cover' ou 'inline-N': o slot do relatório de imagens. */
-  slotId: z.string().regex(/^(cover|inline-\d{1,2})$/),
+  slotId: z.string().regex(/^(cover|inline-u?\d{1,12})$/),
   instruction: z.string().trim().max(500).default(''),
 });
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Card, CardContent } from '@/components/ui/card';
+import { APP_TIME_ZONE } from '@/lib/datetime';
 import { cn } from '@/lib/utils';
 
 export interface RunLogLine {
@@ -50,7 +51,7 @@ export function RunLog({ lines, defaultOpen }: { lines: RunLogLine[]; defaultOpe
               {lines.map((l) => (
                 <div key={l.id} className="flex gap-2">
                   <span className="text-muted-foreground shrink-0 tabular-nums">
-                    {new Date(l.ts).toLocaleTimeString('en-GB', { hour12: false })}
+                    {new Date(l.ts).toLocaleTimeString('en-GB', { hour12: false, timeZone: APP_TIME_ZONE })}
                   </span>
                   <span className="whitespace-pre-wrap break-all">{l.line}</span>
                 </div>

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireSession } from '@/lib/auth';
 import { getConsumptionPlan, getMonthUsage, getSubscription, getWorkspacePlan } from '@/lib/billing';
 import { isStripeConfigured } from '@/lib/stripe';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Plano e cobrança' };
 
@@ -41,7 +42,7 @@ export default async function BillingPage({
   ]);
 
   const nf = new Intl.NumberFormat(locale);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'long' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'long' });
   const money = new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' });
 
   const planName = (id: PlanId) =>

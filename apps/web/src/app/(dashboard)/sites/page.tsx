@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
+import { dateTimeFormat } from '@/lib/datetime';
 
 export const metadata = { title: 'Sites' };
 
@@ -24,7 +25,7 @@ export default async function SitesPage() {
   const { workspaceId } = await requireSession();
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('sites'), getLocale()]);
-  const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
+  const dateFmt = dateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
 
   const [siteRows, wpCredentials] = await Promise.all([
     db.select().from(sites).where(eq(sites.workspaceId, workspaceId)).orderBy(desc(sites.createdAt)),

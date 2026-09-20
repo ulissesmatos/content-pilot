@@ -206,3 +206,17 @@
   font-size: 0.9em;
   padding: 0.1rem 0.3rem;
 }
+
+/* Modo de edição de texto na prévia do artigo: os trechos editáveis se destacam. */
+.article-body [data-editing='true'] {
+  border-radius: 0.25rem;
+  cursor: text;
+  outline: 1px dashed var(--border);
+  outline-offset: 3px;
+}
+.article-body [data-editing='true']:hover {
+  outline-color: var(--muted-foreground);
+}
+.article-body [data-editing='true']:focus {
+  outline: 2px solid var(--ring);
+}

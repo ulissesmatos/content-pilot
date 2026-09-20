@@ -24,7 +24,7 @@ export interface InlineImage {
 const PARAGRAPH_END = /<!-- \/wp:paragraph -->/g;
 const PLAIN_P_END = /<\/p>/g;
 /** Regiões de bloco gerenciado (widget) — nunca inserir imagem dentro delas. */
-const MANAGED_RANGE = /<!-- ([A-Za-z0-9_-]+):START -->[\s\S]*?<!-- \1:END -->/g;
+export const MANAGED_RANGE = /<!-- ([A-Za-z0-9_-]+):START -->[\s\S]*?<!-- \1:END -->/g;
 
 function escapeHtml(s: string): string {
   return s

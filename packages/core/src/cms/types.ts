@@ -55,6 +55,8 @@ export interface CmsMediaUpload {
   alt?: string;
   /** Legenda/atribuição da imagem. */
   caption?: string;
+  /** Título do item na biblioteca de mídia (também é SEO). */
+  title?: string;
 }
 
 export interface CmsMedia {
@@ -87,6 +89,8 @@ export interface CmsAdapter {
   updatePost(id: number, patch: CmsUpdatePostInput): Promise<CmsPost>;
   createPost(input: CmsCreatePostInput): Promise<CmsPost>;
   uploadMedia(input: CmsMediaUpload): Promise<CmsMedia>;
+  /** Ajusta o SEO de uma imagem que já está na biblioteca (alt, legenda, título). */
+  updateMedia(id: number, patch: { alt?: string; caption?: string; title?: string }): Promise<void>;
   listCategories(): Promise<CmsTerm[]>;
   listTags(): Promise<CmsTerm[]>;
 }

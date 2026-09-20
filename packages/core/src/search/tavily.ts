@@ -115,7 +115,10 @@ export class TavilyClient implements SearchClient {
         .map((img) => (typeof img === 'string' ? { url: img } : { url: img.url ?? '', description: img.description }))
         .filter((img) => /^https?:\/\//.test(img.url))
         .slice(0, limit);
-    } catch {
+    } catch (err) {
+      // A capa é opcional, mas esconder 401/429/timeout torna impossível
+      // distinguir "não havia imagem" de uma falha de configuração.
+      console.warn('[tavily] busca de imagens falhou', err instanceof Error ? err.message : String(err));
       return [];
     }
   }

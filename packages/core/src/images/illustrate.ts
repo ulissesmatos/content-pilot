@@ -4,7 +4,7 @@ import { stripDiacritics } from '../i18n/slug';
 import type { JsonSchema, LlmProvider } from '../llm/types';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import type { ImageCandidate, ImageSearchClient } from './openverse';
-import type { ImageGenClient } from './generate';
+import { ImageGenerationError, type ImageGenClient } from './generate';
 
 /**
  * Ilustração de artigo (Fase 3): busca imagens (web + acervo aberto), mostra as
@@ -318,7 +318,14 @@ async function generateFallbackCover(
     input.keywords.length ? ` (${input.keywords.slice(0, 3).join(', ')})` : ''
   }. Photorealistic, clean composition, no text, no watermark, no logos.`;
   log('ilustração: gerando capa com IA (nenhuma candidata aprovada)');
-  const generated = await deps.imageGen.generate(prompt);
+  let generated;
+  try {
+    generated = await deps.imageGen.generate(prompt);
+  } catch (err) {
+    const reason = err instanceof ImageGenerationError || err instanceof Error ? err.message : String(err);
+    log(`ilustração: geração de capa com IA falhou: ${reason}`);
+    return null;
+  }
   if (!generated) {
     log('ilustração: geração de capa com IA falhou');
     return null;

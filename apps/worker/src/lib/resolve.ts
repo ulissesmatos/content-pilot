@@ -118,7 +118,17 @@ async function firstCredentialOfType(db: Db, workspaceId: string, type: string) 
   return platform ?? null;
 }
 
-/** Modelo padrão por provedor quando o fallback automático troca de provedor sem o cliente ter escolhido um modelo. */
+/** Chave do sistema, isolada das chaves BYOK. Só é chamada após a autorização do dono. */
+async function platformCredentialOfType(db: Db, type: string) {
+  const [platform] = await db
+    .select()
+    .from(credentials)
+    .where(and(isNull(credentials.workspaceId), eq(credentials.type, type as never)))
+    .limit(1);
+  return platform ?? null;
+}
+
+/** Modelo padrão por provedor quando o workspace ainda não escolheu um modelo BYOK. */
 const BYOK_FALLBACK_MODEL: Record<LlmProviderName, { text: string; vision: string }> = {
   openai: { text: 'gpt-4.1-mini', vision: 'gpt-4.1-mini' },
   anthropic: { text: 'claude-sonnet-4-5', vision: 'claude-haiku-4-5' },
@@ -129,14 +139,10 @@ function byokDefaultModel(provider: LlmProviderName, purpose: LlmPurpose | undef
   return BYOK_FALLBACK_MODEL[provider][purpose === 'illustrate' ? 'vision' : 'text'];
 }
 
-/**
- * Alguma OUTRA credencial de IA própria do workspace, preferindo OpenAI (o
- * caso pedido: sem chave OpenRouter mas com chave OpenAI usa tudo via OpenAI).
- */
-async function firstOtherOwnLlmCredential(db: Db, workspaceId: string, exclude: LlmProviderName) {
+/** A escolha automática de BYOK é determinística e privilegia OpenAI. */
+async function preferredOwnLlmCredential(db: Db, workspaceId: string) {
   const order: LlmProviderName[] = ['openai', 'anthropic', 'openrouter'];
   for (const provider of order) {
-    if (provider === exclude) continue;
     const cred = await ownCredentialOfType(db, workspaceId, provider);
     if (cred) return { cred, provider };
   }
@@ -163,7 +169,7 @@ export interface LlmTaskConfig {
   model: string;
   credentialId?: string;
   maxTokens?: number;
-  /** Usada só para escolher o modelo padrão do fallback automático (illustrate exige visão). */
+  /** Usada para escolher o modelo BYOK padrão (illustrate exige visão). */
   purpose?: LlmPurpose;
 }
 
@@ -171,24 +177,49 @@ export interface LlmTaskConfig {
  * Resolve provedor/modelo/credencial de uma etapa do pipeline.
  *
  * Ordem de decisão:
- * 1. `credentialId` explícito (fluxo antigo, intocado).
- * 2. Preferência do próprio workspace (`workspace_ai_settings`, só tem efeito
- *    em BYOK): se o cliente escolheu provedor+modelo e AINDA tem a credencial
- *    daquele provedor, essa escolha vale — mesmo que o perfil do admin
- *    aponte para outro provedor.
- * 3. Provedor do perfil do admin: credencial própria do workspace, com
- *    cascata para a chave da plataforma quando permitido (comportamento de
- *    sempre).
- * 4. Fallback automático: nenhuma credencial (própria ou de plataforma) para
- *    o provedor do perfil, mas o workspace tem OUTRA credencial de IA própria
- *    — usa essa, com o modelo que o cliente escolheu para ela (se bater) ou
- *    um modelo padrão razoável. É o caso pedido: sem chave OpenRouter mas com
- *    chave OpenAI, o pipeline continua rodando via OpenAI.
+ * 1. `credentialId` explícito (legado, com isolamento de tenant).
+ * 2. BYOK explícito do workspace. O provedor e o modelo escolhidos são
+ *    invariáveis: nunca há fallback OpenAI → OpenRouter (ou o inverso).
+ * 3. BYOK sem escolha explícita: primeira chave própria na ordem OpenAI,
+ *    Anthropic, OpenRouter, com modelo nativo padrão.
+ * 4. Chave/perfil do sistema somente para o super admin, quando ele desligou
+ *    a prioridade BYOK — ou quando não possui nenhuma chave própria. Falta de
+ *    chave do sistema sempre retorna ao BYOK, jamais a outro provedor.
  */
 interface ResolvedLlmCredential {
   provider: LlmProviderName;
   model: string;
   apiKey: string;
+}
+
+/**
+ * Resolve exclusivamente uma chave do workspace. Não há fallback entre a
+ * escolha explícita do usuário e outro provedor: OpenAI escolhido jamais vira
+ * OpenRouter por falta/erro de chave.
+ */
+async function resolveByokLlmCredential(
+  db: Db,
+  workspaceId: string,
+  task: LlmTaskConfig,
+  override: Awaited<ReturnType<typeof getWorkspaceAiSettings>>,
+): Promise<ResolvedLlmCredential> {
+  if (override?.provider && override.model) {
+    const cred = await ownCredentialOfType(db, workspaceId, override.provider);
+    if (!cred) {
+      throw new Error(
+        `A preferência BYOK usa ${override.provider}, mas essa chave foi removida. Cadastre-a novamente ou altere a preferência em /credentials.`,
+      );
+    }
+    const fixed = normalizeProviderModel(override.provider, override.model);
+    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
+  }
+
+  const fallback = await preferredOwnLlmCredential(db, workspaceId);
+  if (!fallback) {
+    throw new Error('Nenhuma credencial BYOK de IA disponível — cadastre uma chave OpenAI, Anthropic ou OpenRouter em /credentials.');
+  }
+  const fixed = normalizeProviderModel(fallback.provider, byokDefaultModel(fallback.provider, task.purpose));
+  return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(fallback.cred) };
 }
 
 async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<ResolvedLlmCredential> {
@@ -213,64 +244,39 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
     return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
   }
 
-  let provider = task.provider;
-  let model = task.model;
-
   const override = await getWorkspaceAiSettings(db, workspaceId);
-  if (override?.provider && override.model) {
-    const chosenCred = await ownCredentialOfType(db, workspaceId, override.provider);
-    if (chosenCred) {
-      provider = override.provider;
-      model = override.model;
-    }
-    // credencial escolhida foi removida: ignora a preferência e segue o fluxo abaixo
-  }
+  const canUseSystem = await canUsePlatformKeys(db, workspaceId);
 
-  let cred =
-    provider === task.provider
-      ? await firstCredentialOfType(db, workspaceId, provider)
-      : await ownCredentialOfType(db, workspaceId, provider); // preferência explícita nunca cai para a chave da plataforma
-
-  if (!cred) {
-    const fallback = await firstOtherOwnLlmCredential(db, workspaceId, provider);
-    if (fallback) {
-      cred = fallback.cred;
-      provider = fallback.provider;
-      model =
-        override?.provider === provider && override.model ? override.model : byokDefaultModel(provider, task.purpose);
+  // As chaves do sistema são um modo separado, exclusivo do dono. Mesmo para
+  // ele, BYOK é a prioridade padrão; desligar o toggle permite optar pelo
+  // perfil do sistema. Se a chave configurada no perfil não existir, o BYOK
+  // continua intacto e é a única reserva permitida.
+  if (canUseSystem && override?.preferOwnKeys === false) {
+    const systemCredential = await platformCredentialOfType(db, task.provider);
+    if (systemCredential) {
+      const fixed = normalizeProviderModel(task.provider, task.model);
+      return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential) };
     }
   }
 
-  if (cred && cred.type !== provider) {
-    throw new Error('Credencial indisponível para este workspace/provedor.');
+  try {
+    return await resolveByokLlmCredential(db, workspaceId, task, override);
+  } catch (err) {
+    // Sem nenhuma escolha/chave BYOK, o dono ainda pode usar o sistema no
+    // modo padrão. Uma preferência BYOK explícita nunca recebe esse fallback:
+    // assim um toggle ligado realmente impede que a chave do sistema a
+    // substitua.
+    if (!override?.provider && canUseSystem) {
+      const systemCredential = await platformCredentialOfType(db, task.provider);
+      if (systemCredential) {
+        const fixed = normalizeProviderModel(task.provider, task.model);
+        return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(systemCredential) };
+      }
+    }
+    throw err;
   }
-  if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível — cadastre sua própria chave em /credentials.`);
-  // Última defesa: uma linha antiga com "openai/gpt-4o-mini" em provider
-  // openai bateria HTTP 400 no provedor. O reparo do seed limpa o banco no
-  // deploy, mas isto faz a execução funcionar mesmo antes disso — e protege
-  // de qualquer caminho de escrita que venha a esquecer a normalização.
-  const fixed = normalizeProviderModel(provider, model);
-  return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
 }
 
-/**
- * Resolve provedor/modelo/credencial de uma etapa do pipeline.
- *
- * Ordem de decisão:
- * 1. `credentialId` explícito (fluxo antigo, intocado).
- * 2. Preferência do próprio workspace (`workspace_ai_settings`, só tem efeito
- *    em BYOK): se o cliente escolheu provedor+modelo e AINDA tem a credencial
- *    daquele provedor, essa escolha vale — mesmo que o perfil do admin
- *    aponte para outro provedor.
- * 3. Provedor do perfil do admin: credencial própria do workspace, com
- *    cascata para a chave da plataforma quando permitido (comportamento de
- *    sempre).
- * 4. Fallback automático: nenhuma credencial (própria ou de plataforma) para
- *    o provedor do perfil, mas o workspace tem OUTRA credencial de IA própria
- *    — usa essa, com o modelo que o cliente escolheu para ela (se bater) ou
- *    um modelo padrão razoável. É o caso pedido: sem chave OpenRouter mas com
- *    chave OpenAI, o pipeline continua rodando via OpenAI.
- */
 export async function resolveLlmProvider(db: Db, workspaceId: string, task: LlmTaskConfig): Promise<LlmProvider> {
   const { provider, model, apiKey } = await resolveLlmCredential(db, workspaceId, task);
   return new HttpLlmProvider({
@@ -342,14 +348,19 @@ export async function preflightLlmTasks(
 
 /**
  * Provedor de geração de imagem (fallback do `illustrate`): exige credencial
- * OpenAI PRÓPRIA do workspace, mesmo que o texto use outro provedor — nunca
- * cai para a chave da plataforma. null quando não há chave OpenAI própria ou
- * o cliente não configurou um modelo de geração (`workspace_ai_settings`).
+ * OpenAI do workspace, mesmo que o texto use outro provedor. Só o super admin
+ * com prioridade BYOK desligada pode usar a chave OpenAI do sistema. null
+ * quando não há chave permitida ou modelo de geração configurado.
  */
 export async function resolveImageGenProvider(db: Db, workspaceId: string): Promise<ImageGenClient | null> {
   const settings = await getWorkspaceAiSettings(db, workspaceId);
   if (!settings?.imageGenModel) return null;
-  const cred = await ownCredentialOfType(db, workspaceId, 'openai');
+  const canUseSystem = await canUsePlatformKeys(db, workspaceId);
+  const cred =
+    canUseSystem && settings.preferOwnKeys === false
+      ? (await platformCredentialOfType(db, 'openai')) ?? (await ownCredentialOfType(db, workspaceId, 'openai'))
+      : (await ownCredentialOfType(db, workspaceId, 'openai')) ??
+        (canUseSystem ? await platformCredentialOfType(db, 'openai') : null);
   if (!cred) return null;
   return new OpenAiImageGenClient(decryptApiKey(cred), settings.imageGenModel);
 }

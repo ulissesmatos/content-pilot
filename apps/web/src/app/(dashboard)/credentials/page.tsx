@@ -58,7 +58,9 @@ export default async function CredentialsPage() {
         availableProviders={llmProviders}
         initialProvider={aiSettings?.provider ?? null}
         initialModel={aiSettings?.model ?? null}
+        initialPreferOwnKeys={aiSettings?.preferOwnKeys ?? true}
         initialImageGenModel={aiSettings?.imageGenModel ?? null}
+        isSuperAdmin={isSuperAdmin}
       />
       {rows.length === 0 ? (
         <EmptyState icon={KeyRound} title={t('emptyTitle')} description={t('emptyDescription')} />

@@ -1,21 +1,14 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { hash } from 'bcryptjs';
-import { and, eq, inArray, isNull, like } from 'drizzle-orm';
-import {
-  checkProviderModel,
-  gameCodesTemplate,
-  genericArticleTemplate,
-  parseTemplateConfig,
-} from '@content-pilot/core';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { gameCodesTemplate, genericArticleTemplate, parseTemplateConfig } from '@content-pilot/core';
 import { createDb } from './client';
 import {
   contentTemplates,
-  credentials,
   modelProfileEntries,
   modelProfiles,
   users,
-  workspaceAiSettings,
   workspaces,
 } from './schema';
 
@@ -30,56 +23,49 @@ config({ path: resolve(import.meta.dirname, '../../../.env') });
 /**
  * Perfis iniciais.
  *
- * `standard` é o default e reproduz os modelos que já estavam em uso antes de
- * a escolha sair da mão do cliente — assim ligar o perfil não muda o
- * comportamento de nenhuma execução existente.
- *
- * `illustrate` tem entrada própria e precisa de um modelo COM VISÃO: se
- * apontasse para o mesmo da geração, trocar aquele por um modelo sem visão
- * faria todo post sair sem capa, em silêncio.
- *
- * Tudo via OpenRouter, inclusive os modelos da Anthropic: é a única chave que
- * a instalação precisa ter. Semear provider 'anthropic' criaria um perfil que
- * só falha na execução, porque não há credencial desse tipo.
+ * Estes perfis pertencem SOMENTE às chaves do sistema, que o super admin pode
+ * usar. Clientes BYOK escolhem o próprio provedor/modelo em /credentials e
+ * não são roteados por estes valores. OpenAI é o padrão de texto e visão;
+ * Anthropic é a alternativa nativa e OpenRouter permanece uma opção explícita.
  */
 const MODEL_PROFILES = [
   {
-    slug: 'economy',
-    name: 'Econômico',
-    description: 'Modelos baratos. Menor custo por post, qualidade menor em textos longos.',
-    isDefault: false,
-    entries: {
-      generate: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      verify: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      illustrate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
-    },
-  },
-  {
-    slug: 'standard',
-    name: 'Padrão',
-    description: 'Equilíbrio entre custo e qualidade. Usado por quem não tem perfil específico.',
+    slug: 'openai',
+    name: 'OpenAI',
+    description: 'Perfil principal do sistema: OpenAI nativo para texto e visão.',
     isDefault: true,
     entries: {
-      generate: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
-      verify: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
-      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      illustrate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      generate: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
+      verify: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
+      discover: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
+      dedupe: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
+      illustrate: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
     },
   },
   {
-    slug: 'premium',
-    name: 'Premium',
-    description: 'Modelos melhores para os planos mais caros. Custo por post maior.',
+    slug: 'anthropic',
+    name: 'Anthropic',
+    description: 'Alternativa nativa para texto e visão via Claude.',
     isDefault: false,
     entries: {
-      generate: { provider: 'openrouter' as const, modelId: 'anthropic/claude-sonnet-4.5' },
-      verify: { provider: 'openrouter' as const, modelId: 'z-ai/glm-5.2' },
-      discover: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      dedupe: { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash' },
-      illustrate: { provider: 'openrouter' as const, modelId: 'anthropic/claude-haiku-4.5' },
+      generate: { provider: 'anthropic' as const, modelId: 'claude-sonnet-4-5' },
+      verify: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
+      discover: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
+      dedupe: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
+      illustrate: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
+    },
+  },
+  {
+    slug: 'openrouter',
+    name: 'OpenRouter',
+    description: 'Opção explícita de roteamento por OpenRouter.',
+    isDefault: false,
+    entries: {
+      generate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      verify: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      discover: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      dedupe: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      illustrate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
     },
   },
 ];
@@ -165,8 +151,10 @@ async function main() {
     }
   }
 
-  // Perfis de modelo. Idempotente: cria o que falta e completa purposes
-  // ausentes, mas NÃO sobrescreve escolha que o admin já fez no painel.
+  // Perfis de sistema. Eles são seed, não preferências do cliente: atualizá-
+  // los de forma determinística evita que uma instalação antiga continue com
+  // OpenRouter/ids prefixados depois do deploy da nova arquitetura.
+  await db.update(modelProfiles).set({ isDefault: false, updatedAt: new Date() });
   for (const seed of MODEL_PROFILES) {
     let [profile] = await db
       .select({ id: modelProfiles.id })
@@ -184,132 +172,25 @@ async function main() {
         })
         .returning({ id: modelProfiles.id });
       console.log(`Perfil de modelo criado: ${seed.slug}`);
+    } else {
+      await db
+        .update(modelProfiles)
+        .set({ name: seed.name, description: seed.description, isDefault: seed.isDefault, updatedAt: new Date() })
+        .where(eq(modelProfiles.id, profile.id));
     }
 
-    const existing = await db
-      .select({ purpose: modelProfileEntries.purpose })
-      .from(modelProfileEntries)
-      .where(eq(modelProfileEntries.profileId, profile!.id));
-    const have = new Set(existing.map((e) => e.purpose));
-
-    const missing = Object.entries(seed.entries).filter(([purpose]) => !have.has(purpose as never));
-    if (missing.length > 0) {
-      await db.insert(modelProfileEntries).values(
-        missing.map(([purpose, entry]) => ({
+    await db.insert(modelProfileEntries).values(
+      Object.entries(seed.entries).map(([purpose, entry]) => ({
           profileId: profile!.id,
           purpose: purpose as 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate',
           provider: entry.provider,
           modelId: entry.modelId,
-        })),
-      );
-      console.log(`  ${seed.slug}: ${missing.map(([p]) => p).join(', ')}`);
-    }
-  }
-
-  // Repara entrada de perfil com id no formato do OpenRouter ("fornecedor/modelo")
-  // salva num provedor nativo, que responde HTTP 400 só na execução. Aconteceu
-  // em produção: os perfis semeados usam ids do OpenRouter, e trocar apenas o
-  // provedor da etapa no painel deixa o id antigo para trás.
-  //
-  // A correção depende de QUAL fornecedor está no prefixo — ver
-  // checkProviderModel. Prefixo que repete o provedor é só ruído e sai fora,
-  // mantendo a credencial que o operador cadastrou. Prefixo de outro
-  // fornecedor não tem equivalente nativo, e aí a única leitura coerente é
-  // roteamento por OpenRouter.
-  const withSlash = await db
-    .select({
-      id: modelProfileEntries.id,
-      purpose: modelProfileEntries.purpose,
-      provider: modelProfileEntries.provider,
-      modelId: modelProfileEntries.modelId,
-      slug: modelProfiles.slug,
-    })
-    .from(modelProfileEntries)
-    .innerJoin(modelProfiles, eq(modelProfiles.id, modelProfileEntries.profileId))
-    .where(
-      and(inArray(modelProfileEntries.provider, ['openai', 'anthropic']), like(modelProfileEntries.modelId, '%/%')),
-    );
-  for (const entry of withSlash) {
-    const check = checkProviderModel(entry.provider, entry.modelId);
-    if (check.fix === 'stripped-prefix') {
-      await db
-        .update(modelProfileEntries)
-        .set({ modelId: check.modelId, updatedAt: new Date() })
-        .where(eq(modelProfileEntries.id, entry.id));
-      console.log(
-        `Perfil "${entry.slug}" corrigido: "${entry.purpose}" — modelo "${entry.modelId}" → "${check.modelId}" (prefixo repetia o provedor ${entry.provider}; credencial mantida)`,
-      );
-    } else if (check.fix === 'foreign-vendor') {
-      await db
-        .update(modelProfileEntries)
-        .set({ provider: 'openrouter', updatedAt: new Date() })
-        .where(eq(modelProfileEntries.id, entry.id));
-      console.log(
-        `Perfil "${entry.slug}" corrigido: "${entry.purpose}" — provider "${entry.provider}" → "openrouter" (modelo "${entry.modelId}" é do fornecedor ${check.vendor}; exige credencial OpenRouter)`,
-      );
-    }
-  }
-
-  // Desfaz o reparo anterior, que trocava o provedor para openrouter em vez de
-  // remover o prefixo. Ele já rodou em produção e deixou linhas apontando para
-  // uma chave OpenRouter que a instalação pode não ter.
-  //
-  // A condição é estrita de propósito: só age quando a configuração atual é
-  // comprovadamente inutilizável (não existe chave OpenRouter da plataforma) e
-  // a alternativa existe (há chave do fornecedor que está no prefixo). Quem
-  // usa OpenRouter de verdade não é tocado.
-  const platformKeys = await db
-    .select({ type: credentials.type })
-    .from(credentials)
-    .where(isNull(credentials.workspaceId));
-  const havePlatform = new Set(platformKeys.map((c) => c.type));
-  if (!havePlatform.has('openrouter')) {
-    const routed = await db
-      .select({
-        id: modelProfileEntries.id,
-        purpose: modelProfileEntries.purpose,
-        modelId: modelProfileEntries.modelId,
-        slug: modelProfiles.slug,
-      })
-      .from(modelProfileEntries)
-      .innerJoin(modelProfiles, eq(modelProfiles.id, modelProfileEntries.profileId))
-      .where(eq(modelProfileEntries.provider, 'openrouter'));
-    for (const entry of routed) {
-      const vendor = entry.modelId.slice(0, entry.modelId.indexOf('/')).trim().toLowerCase();
-      if (vendor !== 'openai' && vendor !== 'anthropic') continue;
-      if (!havePlatform.has(vendor)) continue;
-      const check = checkProviderModel(vendor, entry.modelId);
-      if (check.fix !== 'stripped-prefix') continue;
-      await db
-        .update(modelProfileEntries)
-        .set({ provider: vendor, modelId: check.modelId, updatedAt: new Date() })
-        .where(eq(modelProfileEntries.id, entry.id));
-      console.log(
-        `Perfil "${entry.slug}" ajustado: "${entry.purpose}" — "openrouter:${entry.modelId}" → "${vendor}:${check.modelId}" (sem chave OpenRouter da plataforma; existe chave ${vendor})`,
-      );
-    }
-  }
-
-  // Mesmo defeito na escolha de modelo do cliente BYOK (/credentials).
-  const aiSettings = await db
-    .select({
-      workspaceId: workspaceAiSettings.workspaceId,
-      provider: workspaceAiSettings.provider,
-      model: workspaceAiSettings.model,
-    })
-    .from(workspaceAiSettings)
-    .where(like(workspaceAiSettings.model, '%/%'));
-  for (const row of aiSettings) {
-    if (!row.provider || !row.model) continue;
-    const check = checkProviderModel(row.provider, row.model);
-    if (check.fix !== 'stripped-prefix') continue;
-    await db
-      .update(workspaceAiSettings)
-      .set({ model: check.modelId, updatedAt: new Date() })
-      .where(eq(workspaceAiSettings.workspaceId, row.workspaceId));
-    console.log(
-      `Preferência de IA corrigida: workspace ${row.workspaceId} — modelo "${row.model}" → "${check.modelId}"`,
-    );
+      })),
+    ).onConflictDoUpdate({
+      target: [modelProfileEntries.profileId, modelProfileEntries.purpose],
+      set: { provider: sql`excluded.provider`, modelId: sql`excluded.model_id`, updatedAt: new Date() },
+    });
+    console.log(`Perfil de sistema sincronizado: ${seed.slug}`);
   }
 
   console.log('Seed concluído.');

@@ -50,6 +50,10 @@ CATEGORIAS DISPONÍVEIS NO SITE (escolha exatamente UMA, copiando o nome como es
 REGRAS:
 - Estruture com introdução direta, seções com headings h3 e conclusão curta.
 - Baseie afirmações factuais nas fontes acima; não invente números, datas ou citações.
+- Escreva como um artigo editorial natural no idioma solicitado, não como uma colagem de resultados de busca ou uma lista de SEO. Não repita a palavra-chave sem necessidade.
+- Ignore menus, breadcrumbs, CTAs, categorias e outros textos de navegação das fontes. Nunca publique fragmentos soltos como "Entrar em...", nomes de seção sem explicação ou rótulos de site.
+- Só use checklist quando o assunto realmente pedir instruções práticas; não transforme uma notícia em checklist apenas para preencher a estrutura.
+- Antes de responder, revise coerência: cada parágrafo deve explicar uma ideia completa e o texto não pode conter frases duplicadas, espaços duplos ou afirmações sem fonte.
 - Blocos Gutenberg obrigatórios: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
 - NÃO coloque o título dentro do updatedHtml; sem <script>/<style>; sem placeholders.
 

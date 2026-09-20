@@ -11,6 +11,7 @@ import type { LlmProviderName } from './model-resolver';
 export interface WorkspaceAiSettings {
   provider: LlmProviderName | null;
   model: string | null;
+  preferOwnKeys: boolean;
   imageGenModel: string | null;
 }
 
@@ -19,6 +20,7 @@ export async function getWorkspaceAiSettings(db: Db, workspaceId: string): Promi
     .select({
       provider: workspaceAiSettings.provider,
       model: workspaceAiSettings.model,
+      preferOwnKeys: workspaceAiSettings.preferOwnKeys,
       imageGenModel: workspaceAiSettings.imageGenModel,
     })
     .from(workspaceAiSettings)

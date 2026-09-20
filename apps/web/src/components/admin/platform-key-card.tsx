@@ -112,8 +112,8 @@ export function PlatformKeyCard({
           <AlertDialogHeader>
             <AlertDialogTitle>Remover a chave {label}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Todo workspace que não tem chave própria depende desta como reserva. Sem ela, as
-              execuções que usam {label} passam a falhar.
+              Apenas o workspace do super admin pode usar esta chave. As chaves BYOK dos clientes
+              não são afetadas; execuções do sistema que usam {label} passarão a falhar.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

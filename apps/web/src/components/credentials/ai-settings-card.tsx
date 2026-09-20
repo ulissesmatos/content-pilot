@@ -37,12 +37,16 @@ export function AiSettingsCard({
   availableProviders,
   initialProvider,
   initialModel,
+  initialPreferOwnKeys,
   initialImageGenModel,
+  isSuperAdmin,
 }: {
   availableProviders: LlmType[];
   initialProvider: LlmType | null;
   initialModel: string | null;
+  initialPreferOwnKeys: boolean;
   initialImageGenModel: string | null;
+  isSuperAdmin: boolean;
 }) {
   const t = useTranslations('credentials.aiSettings');
 
@@ -53,6 +57,7 @@ export function AiSettingsCard({
   const [models, setModels] = useState<ModelOption[]>([]);
   const [loadingModels, startLoadingModels] = useTransition();
   const [saving, startSaving] = useTransition();
+  const [preferOwnKeys, setPreferOwnKeys] = useState(initialPreferOwnKeys);
 
   useEffect(() => {
     if (provider === PLATFORM_DEFAULT) return;
@@ -71,6 +76,7 @@ export function AiSettingsCard({
       const res = await saveAiSettingsAction({
         provider: provider === PLATFORM_DEFAULT ? null : provider,
         model: provider === PLATFORM_DEFAULT ? null : model,
+        preferOwnKeys,
       });
       if (res.ok) toast.success(t('saved'));
       else toast.error(res.error);
@@ -158,6 +164,15 @@ export function AiSettingsCard({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          ) : null}
+          {isSuperAdmin ? (
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+              <div className="space-y-0.5">
+                <Label>{t('preferOwnKeysLabel')}</Label>
+                <p className="text-muted-foreground text-xs">{t('preferOwnKeysDescription')}</p>
+              </div>
+              <Switch checked={preferOwnKeys} onCheckedChange={setPreferOwnKeys} />
             </div>
           ) : null}
           <Button size="sm" disabled={saving || (provider !== PLATFORM_DEFAULT && !model)} onClick={save}>

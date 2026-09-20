@@ -81,6 +81,7 @@ export async function getWorkspaceReadiness(
         : eq(credentials.workspaceId, workspaceId),
     );
   const available = new Set(rows.map((r) => r.type));
+  const ownAvailable = new Set(rows.filter((r) => r.workspaceId === workspaceId).map((r) => r.type));
 
   const [[catalogSize], override, [site]] = await Promise.all([
     db.select({ total: count() }).from(modelCatalog).where(eq(modelCatalog.available, true)),
@@ -101,20 +102,51 @@ export async function getWorkspaceReadiness(
     });
   }
 
-  // Resolve as etapas antes de tocar no catálogo: assim a consulta pede as
-  // 5 linhas em uso, e não as 400+ disponíveis, a cada render da página.
-  const resolved = new Map<LlmPurpose, { provider: LlmProviderName; model: string }>();
+  // BYOK e sistema têm resoluções independentes. Para BYOK, um modelo
+  // escolhido pelo cliente vale em todas as etapas; sem escolha, a ordem é
+  // OpenAI → Anthropic → OpenRouter. Só o super admin que desligou a
+  // prioridade BYOK usa os perfis de sistema.
+  const resolved = new Map<LlmPurpose, { provider: LlmProviderName; model: string; byok: boolean }>();
+  const byokProvider = override?.provider ?? (['openai', 'anthropic', 'openrouter'] as const).find((p) => ownAvailable.has(p));
+  const forceByok = !owner || override?.preferOwnKeys !== false;
+  if (forceByok && !byokProvider) {
+    issues.push({
+      code: 'missing-credential',
+      message: 'Nenhuma chave BYOK de IA está cadastrada. Adicione uma chave OpenAI, Anthropic ou OpenRouter.',
+      fix: { label: 'Cadastrar credencial', href: '/credentials' },
+      blocking: true,
+    });
+  }
+
   for (const purpose of LLM_PURPOSES) {
     try {
-      const task = await resolveTaskModel(db, workspaceId, purpose as LlmPurpose);
-      let provider = task.provider;
-      let model = task.model;
-      // A escolha do cliente BYOK vence o perfil do admin — mesma ordem do worker.
-      if (override?.provider && override.model && available.has(override.provider)) {
-        provider = override.provider;
-        model = override.model;
+      if (forceByok) {
+        if (!byokProvider) continue;
+        const defaultModel =
+          byokProvider === 'openai'
+            ? 'gpt-4.1-mini'
+            : byokProvider === 'anthropic'
+              ? purpose === 'illustrate' ? 'claude-haiku-4-5' : 'claude-sonnet-4-5'
+              : purpose === 'illustrate' ? 'openai/gpt-4o-mini' : 'z-ai/glm-5.2';
+        resolved.set(purpose as LlmPurpose, { provider: byokProvider, model: override?.model ?? defaultModel, byok: true });
+      } else {
+        const task = await resolveTaskModel(db, workspaceId, purpose as LlmPurpose);
+        // Com o toggle desligado, o sistema só vence se a chave do perfil
+        // realmente existir. Sem ela, a mesma regra do worker cai no BYOK.
+        if (available.has(task.provider)) {
+          resolved.set(purpose as LlmPurpose, { provider: task.provider, model: task.model, byok: false });
+        } else if (byokProvider) {
+          const defaultModel =
+            byokProvider === 'openai'
+              ? 'gpt-4.1-mini'
+              : byokProvider === 'anthropic'
+                ? purpose === 'illustrate' ? 'claude-haiku-4-5' : 'claude-sonnet-4-5'
+                : purpose === 'illustrate' ? 'openai/gpt-4o-mini' : 'z-ai/glm-5.2';
+          resolved.set(purpose as LlmPurpose, { provider: byokProvider, model: override?.model ?? defaultModel, byok: true });
+        } else {
+          resolved.set(purpose as LlmPurpose, { provider: task.provider, model: task.model, byok: false });
+        }
       }
-      resolved.set(purpose as LlmPurpose, { provider, model });
     } catch {
       issues.push({
         code: 'no-model-profile',
@@ -159,8 +191,9 @@ export async function getWorkspaceReadiness(
   const byKey = new Map(catalogRows.map((c) => [`${c.provider}:${c.modelId}`, c]));
 
   const seenMissing = new Set<string>();
-  for (const [purpose, { provider, model }] of resolved) {
-    if (!available.has(provider)) {
+  for (const [purpose, { provider, model, byok }] of resolved) {
+    const providerAvailable = byok ? ownAvailable.has(provider) : available.has(provider);
+    if (!providerAvailable) {
       // Uma credencial faltando aparece em todas as etapas; o aviso é um só.
       if (!seenMissing.has(provider)) {
         seenMissing.add(provider);

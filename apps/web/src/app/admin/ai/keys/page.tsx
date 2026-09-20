@@ -44,7 +44,7 @@ export default async function AdminAiKeysPage() {
     <>
       <PageHeader
         title="Chaves da plataforma"
-        description="Usadas por todo workspace que não traz chave própria. Guardadas cifradas no cofre."
+        description="Reservadas exclusivamente ao super admin. Guardadas cifradas no cofre e separadas das chaves BYOK."
       />
 
       <Alert variant="info">
@@ -52,8 +52,9 @@ export default async function AdminAiKeysPage() {
         <AlertTitle>Como a chave é escolhida</AlertTitle>
         <AlertDescription>
           <p>
-            A execução procura primeiro uma credencial do próprio workspace; se não houver, cai
-            para a chave da plataforma configurada aqui. Trocar uma chave vale em até 30 segundos.
+            Só o workspace do super admin pode usar estas chaves. Por padrão, as chaves BYOK dele
+            têm prioridade; o toggle em Credenciais permite optar pelas chaves do sistema. Nenhum
+            cliente recebe fallback para elas.
           </p>
         </AlertDescription>
       </Alert>

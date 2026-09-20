@@ -1,0 +1,1 @@
+ALTER TABLE "workspace_ai_settings" ADD COLUMN "prefer_own_keys" boolean DEFAULT true NOT NULL;

@@ -1,10 +1,18 @@
 import { fetchWithRetry } from '../http/fetch-retry';
 
+export class ImageGenerationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImageGenerationError';
+  }
+}
+
 /**
  * Geração de imagem via OpenAI (gpt-image-1 / dall-e-3): último recurso do
  * `illustrate` quando nenhuma candidata da web/acervo passa na revisão de
- * qualidade. Só entra em jogo com credencial OpenAI própria do workspace —
- * nunca com a chave da plataforma (ver resolveImageGenProvider no worker).
+ * qualidade. Usa a credencial OpenAI BYOK; só o super admin, ao desligar a
+ * prioridade BYOK, pode usar a chave OpenAI do sistema (ver resolver do
+ * worker).
  */
 
 export interface GeneratedImage {
@@ -47,13 +55,18 @@ export class OpenAiImageGenClient implements ImageGenClient {
         },
         { timeoutMs: 120_000, retries: 2, retryDelayMs: 5_000, fetchImpl: this.fetchImpl },
       );
-      const json = (await res.json()) as { data?: Array<{ b64_json?: string }> };
+      const json = (await res.json()) as { data?: Array<{ b64_json?: string }>; error?: { message?: string } };
       const b64 = json.data?.[0]?.b64_json;
-      if (!b64) return null;
+      if (!b64) {
+        throw new ImageGenerationError(json.error?.message ?? 'A API da OpenAI não devolveu dados de imagem.');
+      }
       return { data: Uint8Array.from(Buffer.from(b64, 'base64')), mimeType: 'image/png' };
-    } catch {
-      // geração de imagem nunca derruba o post — sem capa é melhor que falhar o pipeline
-      return null;
+    } catch (err) {
+      // O post não falha por uma capa, mas o log precisa dizer POR QUÊ. Antes
+      // este catch silencioso fazia chave/modelo/restrição de conta parecerem
+      // "busca de imagem instável".
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new ImageGenerationError(`OpenAI Images (${this.model}): ${reason}`);
     }
   }
 }

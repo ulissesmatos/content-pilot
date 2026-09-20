@@ -74,7 +74,8 @@ export class OpenverseClient implements ImageSearchClient {
           sourcePage: r.foreign_landing_url ?? r.url!,
           provider: 'openverse',
         }));
-    } catch {
+    } catch (err) {
+      console.warn('[openverse] busca de imagens falhou', err instanceof Error ? err.message : String(err));
       return []; // busca de imagem nunca derruba a geração do post
     }
   }

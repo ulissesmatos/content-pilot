@@ -96,12 +96,13 @@ const saveAiSettingsSchema = z
   .object({
     provider: z.enum(LLM_TYPES).nullable(),
     model: z.string().min(1).max(200).nullable(),
+    preferOwnKeys: z.boolean(),
   })
   .refine((v) => (v.provider === null) === (v.model === null), {
     message: 'Escolha provedor e modelo juntos, ou limpe os dois.',
   });
 
-/** Provedor/modelo ativo para texto e visão. null/null volta ao padrão do admin. */
+/** Provedor/modelo ativo para texto e visão. null/null escolhe a primeira chave BYOK (OpenAI primeiro). */
 export async function saveAiSettingsAction(input: unknown): Promise<ActionResult<null>> {
   return runAuthedAction(saveAiSettingsSchema, input, async (data, { workspaceId }) => {
     let model = data.model;
@@ -144,6 +145,7 @@ export async function saveAiSettingsAction(input: unknown): Promise<ActionResult
     await upsertWorkspaceAiSettings(db, workspaceId, {
       provider: data.provider,
       model,
+      preferOwnKeys: data.preferOwnKeys,
       imageGenModel: current?.imageGenModel ?? null,
     });
     revalidatePath('/credentials');
@@ -161,12 +163,24 @@ export async function saveImageGenSettingsAction(input: unknown): Promise<Action
       if (!cred) {
         throw new UserFacingError('Cadastre uma credencial OpenAI própria antes de ativar a geração de imagem.');
       }
+      try {
+        const models = await fetchOpenAiImageModels(apiKeyOf(cred, workspaceId));
+        if (models.length > 0 && !models.some((m) => m.modelId === data.imageGenModel)) {
+          throw new UserFacingError(
+            `"${data.imageGenModel}" não aparece entre os modelos de imagem da sua conta OpenAI. Escolha um da lista.`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof UserFacingError) throw err;
+        console.warn('[ai-settings] não foi possível conferir o modelo de imagem na conta do usuário', err);
+      }
     }
     const db = getTenantDb(workspaceId);
     const current = await getWorkspaceAiSettings(db, workspaceId);
     await upsertWorkspaceAiSettings(db, workspaceId, {
       provider: current?.provider ?? null,
       model: current?.model ?? null,
+      preferOwnKeys: current?.preferOwnKeys ?? true,
       imageGenModel: data.imageGenModel,
     });
     revalidatePath('/credentials');

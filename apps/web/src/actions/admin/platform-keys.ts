@@ -14,7 +14,7 @@ import type { ActionResult } from '@/lib/action-utils';
  * Chaves de IA/busca da plataforma: reserva exclusiva do workspace do
  * proprietário (ADMIN_EMAIL). Não são fallback para os demais workspaces —
  * todo o resto é BYOK. Ver canUsePlatformKeys em
- * apps/worker/src/lib/platform-access.ts e a cascata em resolve.ts.
+ * apps/worker/src/lib/platform-access.ts e a resolução isolada em resolve.ts.
  */
 const PROVIDER_TYPES = ['openai', 'openrouter', 'anthropic', 'tavily'] as const;
 

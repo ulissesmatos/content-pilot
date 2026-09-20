@@ -118,11 +118,27 @@ esquema, `SERVICE_FQDN_*` só o hostname.
 O container `migrate` aplica as migrations e o seed e **sai com código 0**:
 vê-lo como `exited` na lista é o comportamento correto, não uma falha.
 
-Se o Coolify marcar o recurso como não saudável por causa dele, adicione
-`exclude_from_hc: true` ao serviço `migrate` no compose. É uma chave do próprio
-Coolify (documentada para containers de execução única), então o `docker compose`
-puro a rejeita — por isso ela não vem no arquivo do repositório. Aplique só se o
-sintoma aparecer.
+### Sobre o status "running:unknown"
+
+Um recurso do tipo Docker Compose costuma ficar em `running:unknown` mesmo com
+tudo no ar. Isso é uma limitação conhecida do Coolify, não configuração errada:
+aplicações compose **não usam a página de Health Check** do painel, e o Coolify
+não inspeciona o resultado dos healthchecks declarados no compose
+([#9524](https://github.com/coollabsio/coolify/issues/9524)). Ligar o health
+check na interface não muda esse status.
+
+O healthcheck do serviço `web` neste compose funciona — quem o executa é o
+Docker, e `docker ps` mostra `(healthy)`. A verificação que vale é a externa:
+
+```sh
+curl https://pilot.seudominio.com/api/health   # {"ok":true}
+```
+
+Para alerta de verdade, aponte um monitor externo (UptimeRobot, Better Stack,
+healthchecks.io) para essa URL. A chave `exclude_from_hc: true`, sugerida para
+containers de execução única, **não é respeitada em aplicações compose**
+([#6591](https://github.com/coollabsio/coolify/issues/6591)) — não adianta
+adicioná-la ao `migrate`.
 
 ### 6. Conferir
 

@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { hash } from 'bcryptjs';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, like } from 'drizzle-orm';
 import { gameCodesTemplate, genericArticleTemplate, parseTemplateConfig } from '@content-pilot/core';
 import { createDb } from './client';
 import { contentTemplates, modelProfileEntries, modelProfiles, users, workspaces } from './schema';
@@ -191,6 +191,35 @@ async function main() {
       );
       console.log(`  ${seed.slug}: ${missing.map(([p]) => p).join(', ')}`);
     }
+  }
+
+  // Repara entrada de perfil com id no formato do OpenRouter ("vendor/modelo",
+  // ex.: "openai/gpt-5.4-nano") salva num provedor nativo (openai/anthropic).
+  // A API nativa rejeita esse formato com HTTP 400 em runtime — e isso
+  // aconteceu de verdade num perfil de produção antes de existir a validação
+  // em setProfileEntryAction. O modelo pretendido já está certo nesse
+  // formato; só o provedor está errado, então a correção é trocar para
+  // openrouter mantendo o mesmo modelId — nunca inventar um id nativo.
+  const badEntries = await db
+    .select({
+      id: modelProfileEntries.id,
+      profileId: modelProfileEntries.profileId,
+      purpose: modelProfileEntries.purpose,
+      provider: modelProfileEntries.provider,
+      modelId: modelProfileEntries.modelId,
+    })
+    .from(modelProfileEntries)
+    .where(
+      and(inArray(modelProfileEntries.provider, ['openai', 'anthropic']), like(modelProfileEntries.modelId, '%/%')),
+    );
+  for (const entry of badEntries) {
+    await db
+      .update(modelProfileEntries)
+      .set({ provider: 'openrouter', updatedAt: new Date() })
+      .where(eq(modelProfileEntries.id, entry.id));
+    console.log(
+      `Perfil de modelo corrigido: purpose "${entry.purpose}" — provider "${entry.provider}" → "openrouter" (modelo "${entry.modelId}" mantido; exigia credencial OpenRouter, não ${entry.provider})`,
+    );
   }
 
   console.log('Seed concluído.');

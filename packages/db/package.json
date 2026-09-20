@@ -12,7 +12,7 @@
     "migrate": "drizzle-kit migrate",
     "seed": "tsx src/seed.ts",
     "typecheck": "tsc --noEmit",
-    "test:integration": "tsx --test test/*.test.ts"
+    "test:integration": "tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@content-pilot/core": "workspace:*",

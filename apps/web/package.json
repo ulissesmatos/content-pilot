@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:integration": "node --conditions=react-server --import tsx --test test/*.test.ts"
+    "test:integration": "node --conditions=react-server --import tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@content-pilot/core": "workspace:*",

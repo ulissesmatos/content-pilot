@@ -30,6 +30,13 @@ describe('buildLlmRequest', () => {
     });
   });
 
+  it('openai GPT-5: usa max_completion_tokens e omite temperature', () => {
+    const r = buildLlmRequest({ provider: 'openai', model: 'gpt-5.4-nano', apiKey: 'sk-o' }, 'p', SCHEMA, 'meu_schema', 8000, 0.4);
+    expect(r.body.max_completion_tokens).toBe(8000);
+    expect(r.body.max_tokens).toBeUndefined();
+    expect(r.body.temperature).toBeUndefined();
+  });
+
   it('openrouter: json_object + response-healing + headers de atribuição', () => {
     const r = buildLlmRequest(
       {

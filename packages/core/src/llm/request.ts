@@ -13,6 +13,10 @@ export interface BuiltLlmRequest {
   body: Record<string, unknown>;
 }
 
+function isGpt5Model(model: string): boolean {
+  return /^gpt-5(?:[.-]|$)/i.test(model);
+}
+
 export function buildLlmRequest(
   cfg: LlmProviderConfig,
   prompt: string,
@@ -43,6 +47,7 @@ export function buildLlmRequest(
       : [{ role: 'user', content: openaiContent }];
 
   if (cfg.provider === 'openai') {
+    const gpt5 = isGpt5Model(cfg.model);
     return {
       url: 'https://api.openai.com/v1/chat/completions',
       headers: {
@@ -51,8 +56,7 @@ export function buildLlmRequest(
       },
       body: {
         model: cfg.model,
-        max_tokens: cappedMaxTokens,
-        temperature,
+        ...(gpt5 ? { max_completion_tokens: cappedMaxTokens } : { max_tokens: cappedMaxTokens, temperature }),
         messages,
         response_format: {
           type: 'json_schema',

@@ -1,4 +1,4 @@
-import { fetchWithRetry } from '../http/fetch-retry';
+import { fetchWithRetry, HttpError } from '../http/fetch-retry';
 import { buildLlmRequest } from './request';
 import { extractResponseText, extractUsage, isTruncated } from './parse';
 import type { LlmCompleteRequest, LlmCompleteResult, LlmProvider, LlmProviderConfig } from './types';
@@ -44,8 +44,9 @@ export class HttpLlmProvider implements LlmProvider {
       );
       json = await res.json();
     } catch (err) {
+      const detail = err instanceof HttpError && err.body ? `: ${err.body}` : '';
       throw new LlmError(
-        `Falha na chamada da API LLM (${this.cfg.provider}/${this.cfg.model}): ${err instanceof Error ? err.message : String(err)}`,
+        `Falha na chamada da API LLM (${this.cfg.provider}/${this.cfg.model}): ${err instanceof Error ? err.message : String(err)}${detail}`,
       );
     }
 

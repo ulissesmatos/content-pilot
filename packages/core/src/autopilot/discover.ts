@@ -3,6 +3,7 @@ import { LlmError } from '../llm/client';
 import type { LlmProvider } from '../llm/types';
 import type { SearchClient } from '../search/tavily';
 import { monthYear, todayLong } from '../i18n/dates';
+import { rewriteDashesInText, stripDecorativeDates } from '../text/style-guard';
 import { stripDiacritics } from '../i18n/slug';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import {
@@ -120,6 +121,11 @@ export interface DiscoveryInput {
   /** Tipos permitidos (vazio = todos). */
   allowedTypes?: ContentType[];
   discoverMaxTokens?: number;
+  /**
+   * Não pôr data/mês/ano nos temas e títulos. Padrão: true. Só templates cujo
+   * nicho usa data como convenção (ex.: códigos de jogos) devem desligar.
+   */
+  avoidDates?: boolean;
 }
 
 export interface DiscardedTopic {
@@ -156,6 +162,14 @@ export function buildDiscoveryQueries(seedTopics: string[], language: string, no
   return queries;
 }
 
+/** Regra de datas para o prompt. Vazia quando o nicho usa data de propósito. */
+function dateRule(input: DiscoveryInput, pt: boolean): string {
+  if (input.avoidDates === false) return '';
+  return pt
+    ? `\n- NÃO ponha data, dia, mês nem ano no tema nem no título sugerido (nada de "(20/09/2026)" ou "de setembro de 2026"). Não use travessão.`
+    : `\n- Do NOT put a date, day, month or year in the topic or suggested title (no "(09/20/2026)" or "September 2026"). Do not use em or en dashes.`;
+}
+
 function buildDiscoveryPrompt(input: DiscoveryInput, searchContext: string, language: string, now: Date): string {
   const isPt = language.toLowerCase().startsWith('pt');
   const typeList = (input.allowedTypes?.length ? input.allowedTypes : CONTENT_TYPES).join(', ');
@@ -172,7 +186,7 @@ ${searchContext || '(nenhum resultado)'}
 TAREFA: proponha até ${Math.max(input.postsPerCycle * 3, 6)} temas de artigo NOVOS e relevantes para esse nicho, baseados no que está em alta nas fontes acima. Para cada tema escolha o tipo mais adequado entre: ${typeList}.
 
 REGRAS:
-- Temas específicos e pesquisáveis (não "novidades de games", mas "códigos de [jogo X] de ${monthYear(language, now)}").
+- Temas específicos e pesquisáveis (não "novidades de games", mas "o que muda no sistema de amigos do [jogo X]").${dateRule(input, true)}
 - Prefira o que aparece com força nas fontes (sinais de interesse real do público).
 - Não repita o mesmo assunto em candidatos diferentes.
 
@@ -199,7 +213,7 @@ ${searchContext || '(no results)'}
 TASK: propose up to ${Math.max(input.postsPerCycle * 3, 6)} NEW, relevant article topics for this niche, based on what is trending in the sources above. For each, pick the best type among: ${typeList}.
 
 RULES:
-- Specific, searchable topics (not "gaming news" but "[game X] codes for ${monthYear(language, now)}").
+- Specific, searchable topics (not "gaming news" but "what changes in [game X]'s friends system").${dateRule(input, false)}
 - Prefer what shows strong signal in the sources (real audience interest).
 - Do not repeat the same subject across candidates.
 
@@ -325,7 +339,7 @@ export async function runDiscovery(input: DiscoveryInput, deps: DiscoveryDeps): 
       temperature: 0.4,
     });
     llmCalls.push(recordCall('discover', res));
-    candidates = normalizeCandidates(extractJson(res.text), input.allowedTypes);
+    candidates = normalizeCandidates(extractJson(res.text), input.allowedTypes, input.avoidDates !== false);
   } catch (err) {
     if (err instanceof BudgetExceededError) return { ...base, status: 'budget_exceeded', skipReason: err.message };
     if (err instanceof LlmError) {
@@ -458,7 +472,25 @@ const firstString = (r: Record<string, unknown>, keys: string[]): string => {
  * em vez de `candidates` e o tema de `theme`/`type` — aceitamos os apelidos
  * comuns em vez de descartar candidatos perfeitamente bons.
  */
-function normalizeCandidates(parsed: unknown, allowed?: ContentType[]): DiscoveryCandidate[] {
+/**
+ * Limpa tema/título de candidato: travessão sempre reescrito, data decorativa
+ * removida quando a política pede. Guarda de código porque o prompt sozinho
+ * não impediu o "(20/09/2026)" de chegar ao título do post.
+ */
+function makeCleaner(avoidDates: boolean) {
+  return (text: string): string => {
+    let t = text;
+    if (avoidDates) t = stripDecorativeDates(t, { minLength: 8 }).title;
+    return rewriteDashesInText(t, { title: true }).text;
+  };
+}
+
+function normalizeCandidates(
+  parsed: unknown,
+  allowed?: ContentType[],
+  avoidDates = true,
+): DiscoveryCandidate[] {
+  const clean = makeCleaner(avoidDates);
   const root = (parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}) as Record<string, unknown>;
   const list = Array.isArray(parsed)
     ? parsed
@@ -490,11 +522,11 @@ function normalizeCandidates(parsed: unknown, allowed?: ContentType[]): Discover
     seenTopics.add(key);
     const kwRaw = (r.keywords ?? r.tags ?? r.keyphrases) as unknown;
     out.push({
-      topic,
+      topic: clean(topic),
       contentType,
       keywords: Array.isArray(kwRaw) ? kwRaw.map((k) => String(k).trim()).filter(Boolean).slice(0, 8) : [],
       angle: firstString(r, ['angle', 'hook', 'summary', 'description']),
-      suggestedTitle: firstString(r, ['suggestedTitle', 'seoTitle', 'headline', 'title']) || topic,
+      suggestedTitle: clean(firstString(r, ['suggestedTitle', 'seoTitle', 'headline', 'title']) || topic),
     });
   }
   return out;

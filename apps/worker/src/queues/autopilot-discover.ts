@@ -18,6 +18,7 @@ import {
   parseAutopilotDiscovery,
   parseAutopilotLimits,
   PlanLimitError,
+  resolveStylePolicy,
   runDiscovery,
   type DiscoveryCandidate,
 } from '@content-pilot/core';
@@ -26,6 +27,7 @@ import {
   preflightLlmTasks,
   resolveLlmProvider,
   resolveSearchClient,
+  resolveTemplateById,
   resolveWordPressAdapter,
 } from '../lib/resolve';
 import { makeBudgetGuard, recordLlmCalls } from '../lib/run-helpers';
@@ -156,6 +158,13 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
       ...priorTopics.map((t) => t.topic),
     ].filter(Boolean);
 
+    // A política de datas é do template do autopilot: nicho de códigos usa mês/ano
+    // de propósito, artigo genérico não. Falha ao ler o template não impede a
+    // descoberta, só cai no padrão (evitar datas).
+    const stylePolicy = await resolveTemplateById(db, cfg.templateId, workspaceId)
+      .then((t) => resolveStylePolicy(t.config))
+      .catch(() => null);
+
     const result = await runDiscovery(
       {
         seedTopics: cfg.seedTopics,
@@ -164,6 +173,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
         existingTitles,
         postsPerCycle: postsThisCycle,
         allowedTypes: discovery.allowedTypes.length ? discovery.allowedTypes : undefined,
+        avoidDates: stylePolicy ? stylePolicy.datePolicy === 'avoid' : true,
       },
       {
         search,

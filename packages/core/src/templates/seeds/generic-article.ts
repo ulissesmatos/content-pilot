@@ -19,7 +19,7 @@ TAREFA:
 1. Adicione novidades relevantes encontradas nas fontes ao conteúdo do post.
 2. Mantenha TODOS os comentários de blocos Gutenberg do HTML original.
 3. NÃO coloque o título dentro do updatedHtml.
-4. Atualize o mês/ano no título se necessário.
+4. Mantenha o título; só mude se o assunto mudou. Não acrescente data ao título.
 5. NÃO escreva placeholders, reticências ou resumos no lugar do conteúdo original.
 6. NÃO use tags <script> ou <style>.
 7. Se não houver nada relevante para adicionar, defina hasChanges: false.
@@ -67,7 +67,7 @@ FORMATO DA RESPOSTA (obrigatório): exclusivamente um objeto JSON válido, sem m
 - action: "update"
 - noDataFound: false
 - data: {}
-- newTitle: título SEO claro para o artigo (com mês/ano quando fizer sentido).
+- newTitle: título SEO claro para o artigo, sem data, mês ou ano.
 - updatedHtml: O CORPO COMPLETO DO ARTIGO em HTML Gutenberg (introdução + seções h3 + conclusão + os links externos). Este é o conteúdo do post — NUNCA deixe vazio.
 - metaDescription: resumo do artigo em 120-160 caracteres, com a palavra-chave principal, atraente para clique (sem aspas, sem HTML).
 - category: uma das CATEGORIAS DISPONÍVEIS acima (nome idêntico). null se nenhuma servir.

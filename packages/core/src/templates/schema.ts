@@ -101,6 +101,23 @@ export const templateConfigSchema = z.object({
       webSearch: z.boolean().default(true),
     })
     .default({ enabled: false, candidates: 5, inlineMax: 3, webSearch: true }),
+  /**
+   * Estilo do texto gerado. Ambos opcionais: quando ausentes valem os padrões de
+   * `resolveStylePolicy`, o que permite que templates já gravados no banco (e os
+   * clones dos clientes) ganhem a regra sem migração.
+   */
+  style: z
+    .object({
+      /** Reescreve travessões no texto gerado. Padrão: ligado. */
+      noDashes: z.boolean().optional(),
+      /**
+       * 'avoid' tira data decorativa do título. Padrão: 'avoid', exceto em
+       * template com extração de dados (ex.: códigos de jogos), onde mês/ano no
+       * título é convenção do nicho e não ruído.
+       */
+      datePolicy: z.enum(['avoid', 'allow']).optional(),
+    })
+    .optional(),
   validation: z
     .object({
       titleMin: z.number().int().default(10),
@@ -119,6 +136,15 @@ export const templateConfigSchema = z.object({
 });
 
 export type TemplateConfig = z.infer<typeof templateConfigSchema>;
+
+/** Política de estilo efetiva do template, com os padrões aplicados. */
+export function resolveStylePolicy(cfg: TemplateConfig): { noDashes: boolean; datePolicy: 'avoid' | 'allow' } {
+  return {
+    noDashes: cfg.style?.noDashes ?? true,
+    // template que extrai dados verbatim (códigos, cupons...) usa data no título de propósito
+    datePolicy: cfg.style?.datePolicy ?? (cfg.extraction.enabled ? 'allow' : 'avoid'),
+  };
+}
 export type TemplatePrompts = z.infer<typeof templatePromptsSchema>;
 
 export function parseTemplateConfig(raw: unknown): TemplateConfig {

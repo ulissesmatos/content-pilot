@@ -12,8 +12,10 @@ import {
   buildVerifyResponseSchema,
   deriveTopic,
   promptsForLanguage,
+  resolveStylePolicy,
   type TemplateConfig,
 } from '../templates/schema';
+import { applyStyleGuard, buildStyleInstructions } from '../text/style-guard';
 import { validateOutput } from './validate-output';
 import { buildTrimmedContext, prePassCheck } from './pre-pass';
 import {
@@ -321,7 +323,10 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     linkMin: cfg.externalLinks.min,
     linkMax: cfg.externalLinks.max,
   };
-  const prompt = interpolate(promptTemplate, promptVars);
+  // Regras de estilo entram em runtime, e não no texto do template: templates
+  // clonados guardam o próprio prompt no banco e só assim recebem a regra.
+  const stylePolicy = resolveStylePolicy(cfg);
+  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language);
 
   // 10. Chamada LLM de geração
   try {
@@ -401,6 +406,26 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     data:
       parsedRaw.data && typeof parsedRaw.data === 'object' ? (parsedRaw.data as Record<string, unknown>) : {},
   };
+
+  // Guarda de estilo determinística (travessão, data decorativa no título).
+  // Só em geração: num update o HTML é o post inteiro, e reescrever o que um
+  // humano já escreveu seria mexer no que ninguém pediu para mexer.
+  if (input.mode === 'generate' && parsed.updatedHtml) {
+    const guarded = applyStyleGuard(
+      { title: parsed.newTitle, html: parsed.updatedHtml, metaDescription: parsed.metaDescription },
+      stylePolicy,
+      { titleMinLength: cfg.validation.titleMin },
+    );
+    parsed.newTitle = guarded.title;
+    parsed.updatedHtml = guarded.html;
+    parsed.metaDescription = guarded.metaDescription;
+    if (guarded.dashesRewritten > 0 || guarded.titleDateRemoved) {
+      log(
+        `estilo: ${guarded.dashesRewritten} travessão(ões) reescrito(s)` +
+          (guarded.titleDateRemoved ? ', data removida do título' : ''),
+      );
+    }
+  }
 
   if (!parsed.hasChanges) {
     return finish({

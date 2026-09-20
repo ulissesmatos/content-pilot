@@ -152,6 +152,17 @@ export const templateConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Conteúdo incorporado no artigo: vídeo do YouTube e tweets. Opcional: quando
+   * ausente valem os padrões de `resolveEmbedPolicy`.
+   */
+  embeds: z
+    .object({
+      video: z.boolean().optional(),
+      /** 0 desliga tweets. */
+      maxTweets: z.number().int().min(0).max(4).optional(),
+    })
+    .optional(),
+  /**
    * Revisão editorial (etapa separada da redação). Opcional: quando ausente o
    * padrão de `isReviewEnabled` vale, o que dá a revisão a templates já gravados
    * sem migração.
@@ -179,6 +190,19 @@ export const templateConfigSchema = z.object({
 });
 
 export type TemplateConfig = z.infer<typeof templateConfigSchema>;
+
+/**
+ * Que embeds este template incorpora? Padrão: um vídeo e até dois tweets em
+ * artigo; nada em template de dados estruturados (o texto em volta do widget é
+ * curto e um vídeo ali só polui).
+ */
+export function resolveEmbedPolicy(cfg: TemplateConfig): { video: boolean; maxTweets: number } {
+  const structured = cfg.extraction.enabled;
+  return {
+    video: cfg.embeds?.video ?? !structured,
+    maxTweets: cfg.embeds?.maxTweets ?? (structured ? 0 : 2),
+  };
+}
 
 /**
  * A revisão editorial roda neste template? Padrão: sim para artigo, não para

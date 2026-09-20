@@ -3,15 +3,20 @@ import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@c
 import {
   checkTopicAlreadyCovered,
   emptyImageReport,
+  findEmbeds,
   injectAfterParagraphs,
+  injectEmbeds,
   isReviewEnabled,
   jobLlmConfigSchema,
   PlanLimitError,
+  publicFetch,
+  resolveEmbedPolicy,
   resolveStylePolicy,
   reviewArticle,
   runPipeline,
   slugify,
   suggestedInlineCount,
+  type EmbedItem,
   type ImageHint,
   type ImageReport,
   type ReviewChange,
@@ -272,6 +277,8 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     let featuredMediaId: number | undefined;
     let finalHtml = reviewedHtml;
     let imageReport: ImageReport = emptyImageReport();
+    // parágrafos que já têm imagem: o embed não cai neles
+    let imageParagraphs: number[] = [];
     if (template.config.images.enabled) {
       // O editor pode pedir mais imagens do que a proporção do texto sugere, até o teto do template.
       const inlineCount = Math.min(
@@ -317,8 +324,37 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         featuredMediaId = ill.mediaId ?? undefined;
         // cada imagem volta ao parágrafo do PRÓPRIO slot: se uma falhou, as outras não deslizam
         finalHtml = injectAfterParagraphs(finalHtml, ill.inline);
+        imageParagraphs = ill.inline.map((i) => i.afterParagraph);
         result.llmCalls.push(...ill.llmCalls); // registra os tokens da visão no run
         imageReport = ill.report;
+      }
+    }
+
+    // Embeds: vídeo do YouTube e tweets. Cada candidato vem de busca real e tem a
+    // existência confirmada pelo oEmbed da plataforma; o modelo só escolhe entre
+    // os verificados e nunca escreve URL. Falha aqui nunca derruba o post.
+    let embedItems: EmbedItem[] = [];
+    let embedNotes: string[] = [];
+    const embedPolicy = resolveEmbedPolicy(template.config);
+    if (embedPolicy.video || embedPolicy.maxTweets > 0) {
+      try {
+        const found = await findEmbeds(
+          {
+            topic: brief.topic,
+            language: brief.language,
+            keywords: brief.keywords ?? [],
+            wantVideo: embedPolicy.video,
+            maxTweets: embedPolicy.maxTweets,
+          },
+          { search, llm: llmVerify, fetchImpl: publicFetch, checkBudget, log },
+        );
+        result.llmCalls.push(...found.llmCalls);
+        embedItems = found.embeds;
+        embedNotes = found.notes;
+        finalHtml = injectEmbeds(finalHtml, found.embeds, { avoidParagraphs: imageParagraphs });
+        if (found.embeds.length > 0) log(`embeds incorporados: ${found.embeds.map((e) => e.kind).join(', ')}`);
+      } catch (err) {
+        log(`embeds indisponíveis, seguindo sem eles: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -367,7 +403,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         createdWpPostId: created.id,
         createdWpPostUrl: created.link,
         imageReport,
-        editorialReport: reviewNotes,
+        editorialReport: { review: reviewNotes, embeds: embedItems, embedNotes },
         error: null,
         updatedAt: new Date(),
       })

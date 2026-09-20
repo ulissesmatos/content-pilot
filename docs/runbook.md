@@ -316,6 +316,49 @@ e se faltou capa (o HTML não diz se uma imagem foi gerada por IA).
 legenda de crédito ("Imagem: ign.com") é gravada, mas revise antes de publicar
 o que for sensível. Imagens geradas por IA não têm esse problema.
 
+## Revisão editorial e embeds
+
+**Revisão (purpose `review`).** Etapa separada da redação, com modelo próprio em
+`/admin/ai/profiles`. Relê o rascunho atrás de trecho maçante, seção curta e tom
+de IA, reescreve e diz onde uma imagem ajudaria. Roda por padrão em template de
+artigo; template de dados estruturados (códigos) não revisa. `review.enabled`
+no template força.
+
+A revisão **nunca pode piorar o artigo**. Um LLM que reescreve o texto inteiro
+pode perder link, inventar número ou encolher o conteúdo, e nada disso aparece
+na hora. A saída só entra se passar por `acceptRevision`: mesmos links, nenhum
+número que não esteja no rascunho nem nas fontes, texto entre 80% e 190% do
+original, títulos preservados, blocos Gutenberg balanceados. Senão fica o
+original, e o motivo vai para o log e para `briefs.editorial_report`.
+
+Sem a etapa `review` configurada num perfil, o worker pula a revisão e o post sai
+igual. Nas instalações existentes o seed cria a etapa em cada perfil no próximo
+deploy, com o provedor do próprio perfil.
+
+**Dicas de imagem.** O revisor diz depois de qual título uma imagem ajuda e o que
+ela deve mostrar. Esses pontos têm prioridade no plano de imagens, e a dica entra
+na busca daquele slot.
+
+**Embeds.** Um vídeo do YouTube e até dois tweets, como bloco nativo `wp:embed`
+(o WordPress renderiza o player ou o cartão). O modelo **nunca escreve URL**:
+
+1. busca restrita a `youtube.com` e `x.com`/`twitter.com` (Tavily);
+2. a URL é parseada e canonizada (`twitter.com`, que qualquer WordPress
+   reconhece);
+3. a existência é confirmada pelo **oEmbed público** da plataforma: vídeo
+   apagado, privado ou sem embed, e tweet removido, não passam;
+4. só entra quem menciona termos do assunto;
+5. o modelo da etapa `verify` (barato) escolhe **entre os verificados**; índice
+   fora da lista é descartado.
+
+Cada busca de embed gasta uma consulta Tavily (na chave do usuário) e nenhum
+texto de página é baixado. `embeds.video` e `embeds.maxTweets` no template
+ajustam; template de dados estruturados não incorpora nada.
+
+**Teste ponta a ponta.** `apps/worker/test/brief-generate.e2e.test.ts` roda a
+geração inteira contra Postgres real, com provedores falsos (precisa de
+`TEST_DATABASE_URL`; sem ela é pulado).
+
 ## Migrações desta versão
 
 `0009_email_auth.sql` cria `auth_tokens` (links de troca de senha e confirmação,

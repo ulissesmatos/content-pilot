@@ -12,3 +12,6 @@ export * from './schema';
 // Re-export dos operadores de query mais usados, para consumidores que não
 // declaram drizzle-orm diretamente (ex.: apps/worker).
 export { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+
+// Usado pelos testes de integração do worker, que não dependem de drizzle-orm diretamente.
+export { migrate } from 'drizzle-orm/node-postgres/migrator';

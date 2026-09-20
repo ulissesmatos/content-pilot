@@ -61,6 +61,15 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
         }
       }
 
+      // "openai/gpt-5.4-nano" é id do OpenRouter (vendor/modelo); a API nativa
+      // da OpenAI/Anthropic só aceita o id nu ("gpt-5.4-nano") e devolve 400
+      // em runtime — melhor recusar aqui do que descobrir isso num job falho.
+      if (data.provider !== 'openrouter' && data.modelId.includes('/')) {
+        throw new UserFacingError(
+          `"${data.modelId}" parece um id do OpenRouter (formato vendor/modelo). Para ${data.provider === 'openai' ? 'OpenAI' : 'Anthropic'} direto, use o id nativo sem o prefixo — ou troque o provedor desta etapa para OpenRouter.`,
+        );
+      }
+
       const [before] = await tx
         .select({ provider: modelProfileEntries.provider, modelId: modelProfileEntries.modelId })
         .from(modelProfileEntries)

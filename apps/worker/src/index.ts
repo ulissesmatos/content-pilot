@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { PgBoss } from 'pg-boss';
-import { createDb } from '@content-pilot/db';
+import { count, createDb, modelCatalog } from '@content-pilot/db';
 import {
   QUEUE,
   type AutopilotDiscoverPayload,
@@ -15,6 +15,7 @@ import { handlePostProcess } from './queues/post-process';
 import { handleBriefGenerate } from './queues/brief-generate';
 import { handleAutopilotDiscover } from './queues/autopilot-discover';
 import { handleCatalogSync } from './queues/catalog-sync';
+import { startHealthServer } from './health-server';
 
 config({ path: resolve(process.cwd(), '../../.env') });
 
@@ -68,6 +69,23 @@ async function main() {
   await boss.work(QUEUE.catalogSync, async () => {
     await handleCatalogSync(db);
   });
+
+  // Catálogo vazio = instalação nova. Sem isto o admin abre /admin/ai/profiles
+  // e não tem nenhum modelo para escolher até as 3h da manhã — o seletor fica
+  // inútil justamente no momento em que ele está configurando o produto.
+  // O endpoint de listagem do OpenRouter é público, então funciona sem chave.
+  try {
+    const [row] = await db.select({ total: count() }).from(modelCatalog);
+    if (Number(row?.total ?? 0) === 0) {
+      console.log('[worker] catálogo de modelos vazio — sincronizando agora');
+      await boss.send(QUEUE.catalogSync, {});
+    }
+  } catch (err) {
+    // nunca impede o worker de subir: sem catálogo o produto ainda roda
+    console.error('[worker] não foi possível checar o catálogo', err);
+  }
+
+  startHealthServer(db);
 
   console.log(`[worker] pronto — filas registradas (concorrência post.process: ${concurrency})`);
 

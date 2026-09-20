@@ -34,6 +34,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { requireSession } from '@/lib/auth';
+import { getWorkspaceReadiness } from '@/lib/readiness';
+import { ReadinessAlert } from '@/components/readiness-alert';
 
 export const metadata = { title: 'Autopilot' };
 
@@ -59,7 +61,10 @@ function toInitial(config: typeof autopilotConfigs.$inferSelect) {
 }
 
 export default async function AutopilotPage() {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, email } = await requireSession();
+  // Decidido no servidor: o botão desabilitado é conforto, o bloqueio real
+  // está na action (assertWorkspaceReady).
+  const readiness = await getWorkspaceReadiness(workspaceId, email);
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('autopilot'), getLocale()]);
 
@@ -141,6 +146,7 @@ export default async function AutopilotPage() {
       <PageHeader title={t('title')} description={t('description')}>
         <CreateAutopilotDialog sites={siteRows} templates={templateRows} wordpressCredentials={wpCredentialRows} />
       </PageHeader>
+      <ReadinessAlert issues={readiness.issues} />
 
       {configs.length > 0 ? (
         <div className="mb-6 grid grid-cols-3 gap-2 sm:gap-4">
@@ -195,7 +201,7 @@ export default async function AutopilotPage() {
                     {t('colNextRun')}: {config.enabled && config.nextRunAt ? dateFmt.format(config.nextRunAt) : '—'}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <RunDiscoveryButton id={config.id} />
+                    <RunDiscoveryButton id={config.id} blocked={!readiness.ok} />
                     <EditAutopilotDialog
                       sites={siteRows}
                       templates={templateRows}
@@ -266,7 +272,7 @@ export default async function AutopilotPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
-                          <RunDiscoveryButton id={config.id} />
+                          <RunDiscoveryButton id={config.id} blocked={!readiness.ok} />
                           <EditAutopilotDialog
                             sites={siteRows}
                             templates={templateRows}

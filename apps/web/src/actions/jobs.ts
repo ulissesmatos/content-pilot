@@ -6,6 +6,7 @@ import { and, contentJobs, eq, getTenantDb, runs, sites } from '@content-pilot/d
 import { jobLimitsSchema, jobLlmConfigSchema, nextRunAt as computeNextRunAt, postFilterSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { assertWorkspaceReady } from '@/lib/readiness';
 import { getBoss } from '@/lib/boss';
 import { assertTemplateAccessible } from '@/lib/tenant';
 
@@ -194,7 +195,8 @@ export async function deleteJobAction(input: unknown): Promise<ActionResult> {
 }
 
 export async function runJobNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
-  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
+  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId, email }) => {
+    await assertWorkspaceReady(workspaceId, email);
     const db = getTenantDb(workspaceId);
     const [job] = await db
       .select()

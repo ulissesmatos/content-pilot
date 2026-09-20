@@ -61,6 +61,12 @@ services:
       context: .
       target: worker
     environment: *app-env
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     depends_on:
       migrate:
         condition: service_completed_successfully

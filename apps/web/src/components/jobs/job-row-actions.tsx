@@ -1,5 +1,8 @@
 'use client';
 
+/** Mesmo motivo que o servidor devolve — aqui só evita o clique inútil. */
+const BLOCKED_HINT = 'Configuração incompleta: veja o aviso no topo da página.';
+
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Play, Trash2 } from 'lucide-react';
@@ -34,7 +37,7 @@ export function JobEnabledSwitch({ id, enabled }: { id: string; enabled: boolean
   );
 }
 
-export function RunNowButton({ id }: { id: string }) {
+export function RunNowButton({ id, blocked = false }: { id: string; blocked?: boolean }) {
   const t = useTranslations('jobs');
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -42,7 +45,8 @@ export function RunNowButton({ id }: { id: string }) {
     <Button
       variant="outline"
       size="sm"
-      disabled={pending}
+      disabled={pending || blocked}
+      title={blocked ? BLOCKED_HINT : undefined}
       onClick={() =>
         startTransition(async () => {
           const result = await runJobNowAction({ id });

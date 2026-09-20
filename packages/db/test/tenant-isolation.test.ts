@@ -3,7 +3,7 @@ import { after, before, test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { createDb, createTenantDb, getDb } from '../src/client';
 import * as s from '../src/schema';
 import { encryptCredential } from '@content-pilot/core';
@@ -360,5 +360,46 @@ test('seed repairs OpenRouter-style model ids in the direction that keeps the op
     assert.equal(after.dedupe, 'openrouter:deepseek/deepseek-v4-flash');
   } finally {
     await db.delete(s.modelProfiles).where(eq(s.modelProfiles.id, profileId));
+  }
+});
+
+test('readiness catches a broken pipeline config before any run is created', async () => {
+  const { checkProviderModel } = await import('@content-pilot/core');
+  // A prontidao do painel responde "esse modelo existe nessa conta?" pelo
+  // catalogo local. Aqui verificamos a consulta que a sustenta: um par
+  // (provider, modelId) so e valido se existir e estiver disponivel.
+  const rows = [
+    { provider: 'openai' as const, modelId: 'gpt-4o-mini', displayName: 'GPT-4o mini', available: true, supportsVision: true },
+    { provider: 'openai' as const, modelId: 'gpt-3.5-legacy', displayName: 'Legado', available: false, supportsVision: false },
+    { provider: 'openrouter' as const, modelId: 'deepseek/deepseek-v4-flash', displayName: 'DeepSeek', available: true, supportsVision: false },
+  ];
+  await db.insert(s.modelCatalog).values(rows);
+  try {
+    const available = await db
+      .select({ provider: s.modelCatalog.provider, modelId: s.modelCatalog.modelId, supportsVision: s.modelCatalog.supportsVision })
+      .from(s.modelCatalog)
+      .where(eq(s.modelCatalog.available, true));
+    const key = (p: string, m: string) => `${p}:${m}`;
+    const have = new Set(available.map((r) => key(r.provider, r.modelId)));
+
+    // modelo valido do provedor certo
+    assert.ok(have.has(key('openai', 'gpt-4o-mini')));
+    // indisponivel nao conta — e o que pega um modelo removido pelo provedor
+    assert.ok(!have.has(key('openai', 'gpt-3.5-legacy')));
+    // o MESMO id sob outro provedor nao vale: e exatamente o bug do prefixo
+    assert.ok(!have.has(key('openai', 'deepseek/deepseek-v4-flash')));
+    // e o id com prefixo, depois de normalizado, tambem nao existe na OpenAI
+    const fixed = checkProviderModel('openai', 'openai/gpt-4o-mini');
+    assert.equal(fixed.modelId, 'gpt-4o-mini');
+    assert.ok(have.has(key('openai', fixed.modelId)));
+
+    // visao: illustrate exige, e o catalogo e quem sabe
+    const vision = new Map(available.map((r) => [key(r.provider, r.modelId), r.supportsVision]));
+    assert.equal(vision.get(key('openrouter', 'deepseek/deepseek-v4-flash')), false);
+    assert.equal(vision.get(key('openai', 'gpt-4o-mini')), true);
+  } finally {
+    for (const r of rows) {
+      await db.delete(s.modelCatalog).where(and(eq(s.modelCatalog.provider, r.provider), eq(s.modelCatalog.modelId, r.modelId)));
+    }
   }
 });

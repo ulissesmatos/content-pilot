@@ -6,6 +6,7 @@ import { and, briefs, eq, getTenantDb, runs, sites } from '@content-pilot/db';
 import { jobLlmConfigSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { assertWorkspaceReady } from '@/lib/readiness';
 import { getBoss } from '@/lib/boss';
 import { assertTemplateAccessible } from '@/lib/tenant';
 import { getWordPressForSite } from '@/lib/wp';
@@ -51,7 +52,8 @@ async function enqueueBriefGeneration(briefId: string, workspaceId: string): Pro
 }
 
 export async function createBriefAction(input: unknown): Promise<ActionResult<{ id: string; runId: string }>> {
-  return runAuthedAction(createBriefSchema, input, async (data, { workspaceId }) => {
+  return runAuthedAction(createBriefSchema, input, async (data, { workspaceId, email }) => {
+    await assertWorkspaceReady(workspaceId, email);
     const db = getTenantDb(workspaceId);
     const [site] = await db
       .select({ id: sites.id })
@@ -143,7 +145,8 @@ export async function updateBriefAction(input: unknown): Promise<ActionResult<{ 
 
 /** Regera uma pauta que falhou (pautas com post criado não regeram — evita duplicar posts no WP). */
 export async function regenerateBriefAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
-  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
+  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId, email }) => {
+    await assertWorkspaceReady(workspaceId, email);
     const db = getTenantDb(workspaceId);
     const [brief] = await db
       .select()

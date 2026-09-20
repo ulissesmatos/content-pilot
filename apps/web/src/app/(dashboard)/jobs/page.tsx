@@ -10,11 +10,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
+import { getWorkspaceReadiness } from '@/lib/readiness';
+import { ReadinessAlert } from '@/components/readiness-alert';
 
 export const metadata = { title: 'Atualizar posts' };
 
 export default async function JobsPage() {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, email } = await requireSession();
+  // Decidido no servidor: o botão desabilitado é conforto, o bloqueio real
+  // está na action (assertWorkspaceReady).
+  const readiness = await getWorkspaceReadiness(workspaceId, email);
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('jobs'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
@@ -68,6 +73,7 @@ export default async function JobsPage() {
       <PageHeader title={t('title')} description={t('description')}>
         <CreateJobDialog sites={siteRows} templates={templateRows} wordpressCredentials={wpCredentialRows} />
       </PageHeader>
+      <ReadinessAlert issues={readiness.issues} />
       {jobs.length === 0 ? (
         <EmptyState icon={RefreshCw} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (
@@ -100,7 +106,7 @@ export default async function JobsPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        <RunNowButton id={job.id} />
+                        <RunNowButton id={job.id} blocked={!readiness.ok} />
                         <EditJobButton sites={siteRows} templates={templateRows} initial={toInitial(job)} />
                         <DeleteJobButton id={job.id} name={job.name} />
                       </div>

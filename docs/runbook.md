@@ -120,158 +120,35 @@ vê-lo como `exited` na lista é o comportamento correto, não uma falha.
 
 ### Sobre o status "running:unknown"
 
-Um recurso do tipo Docker Compose costuma ficar em `running:unknown` mesmo com
-tudo no ar. Isso é uma limitação conhecida do Coolify, não configuração errada:
-aplicações compose **não usam a página de Health Check** do painel, e o Coolify
-não inspeciona o resultado dos healthchecks declarados no compose
-([#9524](https://github.com/coollabsio/coolify/issues/9524)). Ligar o health
-check na interface não muda esse status.
+Um container sem healthcheck declarado não reporta saúde alguma, e o Coolify
+agrega isso como `unknown` no recurso inteiro — mesmo com os demais saudáveis.
+Era o caso do `worker`. Hoje os três serviços de vida longa declaram health:
 
-O healthcheck do serviço `web` neste compose funciona — quem o executa é o
-Docker, e `docker ps` mostra `(healthy)`. A verificação que vale é a externa:
+| Serviço | Checagem |
+|---|---|
+| `postgres` | `pg_isready` |
+| `web` | `GET /api/health` (confirma banco e RLS ativos) |
+| `worker` | `GET :3001/health` — confirma que o `scheduler.tick` concluiu há menos de 3 minutos |
+
+O do worker é a parte que faltava e é a mais útil: processo vivo não é o mesmo
+que worker funcionando. Um pool esgotado ou um pg-boss preso deixava o
+container "up" com as filas paradas em silêncio.
+
+O `migrate` sai com código 0 e não declara health — é esperado.
+
+Se mesmo assim o recurso ficar em `unknown`, é limitação conhecida do Coolify
+para compose: ele não faz o polling dos healthchecks declarados no compose
+([#9524](https://github.com/coollabsio/coolify/issues/9524)), e
+`exclude_from_hc` não é respeitado nesse modo
+([#6591](https://github.com/coollabsio/coolify/issues/6591)). A verificação
+que sempre vale é externa:
 
 ```sh
 curl https://pilot.seudominio.com/api/health   # {"ok":true}
 ```
 
-Para alerta de verdade, aponte um monitor externo (UptimeRobot, Better Stack,
-healthchecks.io) para essa URL. A chave `exclude_from_hc: true`, sugerida para
-containers de execução única, **não é respeitada em aplicações compose**
-([#6591](https://github.com/coollabsio/coolify/issues/6591)) — não adianta
-adicioná-la ao `migrate`.
-
-### 6. Conferir
-
-1. `https://pilot.seudominio.com/api/health` responde `{"ok":true}` — isso
-   também confirma que o RLS está ativo (papel `content_pilot_tenant` criado).
-2. Login com `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
-3. O painel não mostra o aviso "Worker inativo" depois de ~1 minuto.
-4. `/admin/ai/keys`: cadastre as chaves do sistema (só a sua conta as usa).
-5. `/admin/ai/profiles`: o provedor do perfil padrão precisa bater com a chave.
-6. Cadastre uma segunda conta de teste em `/register` e confirme que ela é
-   obrigada a trazer chave própria em `/credentials`.
-7. Em `/forgot-password`, peça um link para essa conta de teste e confirme que
-   o e-mail chega. É o único jeito de saber que o domínio está verificado no
-   Resend — a tela responde igual mesmo quando nada é enviado.
-
-### Atualizações
-
-`git push` na branch configurada. Com webhook ativo o Coolify rebuilda sozinho;
-senão, **Redeploy**. O `migrate` roda antes de web/worker subirem.
-
-Duas formas de automatizar o "webhook ativo" acima — escolha uma, não as duas:
-
-**A. Nativo do Coolify** (zero código): no recurso, aba **Source**, conecte o
-GitHub App e ligue **Auto Deploy**. O Coolify passa a observar pushes na
-branch configurada sozinho.
-
-**B. GitHub Actions** (`.github/workflows/verify.yml`, jobs `release` e
-`deploy`): dispara **depois** que `pnpm typecheck`/`test`/`build` passam no
-`main` — protege contra deployar um commit quebrado, o que o modo nativo não
-faz sozinho. Requer dois secrets em **Settings → Secrets and variables →
-Actions** do repositório:
-
-| Secret | Onde pegar |
-|---|---|
-| `COOLIFY_WEBHOOK_URL` | No recurso do Coolify → **Webhooks** (ou **Settings** → **Webhook**) → copie a URL completa (já traz o uuid do recurso). |
-| `COOLIFY_TOKEN` | Coolify → seu usuário → **API Tokens** → crie um com permissão de deploy. |
-
-O mesmo job também cria uma tag `vX.Y.Z` e uma GitHub Release quando a versão
-em `package.json` muda (ver `CHANGELOG.md`) — idempotente, não falha se a tag
-já existir.
-
-### Health check mostrando "unknown"
-
-O `web` já tem `HEALTHCHECK` tanto na imagem (`Dockerfile`) quanto no
-`docker-compose.coolify.yml`, batendo em `/api/health`. Se o painel do Coolify
-mostra "unknown" em vez de healthy/unhealthy:
-
-1. **Redeploy** depois de qualquer mudança no Dockerfile/compose — o Coolify
-   só relê o healthcheck ao recriar o container, não num container já rodando.
-2. Espere passar o `start_period` (40s) antes de julgar o status — durante a
-   janela inicial o Docker não reporta nada, o que também aparece como
-   "unknown" por alguns segundos.
-3. No recurso, serviço `web` → **Advanced** → confirme que **Health Check**
-   não está desativado manualmente (o passo 5 acima manda desativar isso só
-   no `migrate`, que sai com código 0 de propósito — nunca no `web`).
-4. Confirme em **Docker Compose Location** que o recurso aponta para
-   `docker-compose.coolify.yml`, não para `docker-compose.yml`/`.prod.yml` —
-   apontando para o arquivo errado, o healthcheck simplesmente não existe
-   naquela definição.
-
-### Backup no Coolify
-
-O PostgreSQL deste compose é um container do stack, então **não entra no backup
-automático do Coolify**, que cobre apenas recursos de banco gerenciados por ele.
-Duas saídas:
-
-- **Scheduled Task** no recurso, com `pg_dump` para um volume e cópia para fora
-  do servidor. Sem a cópia externa, o backup morre junto com a VM.
-- **PostgreSQL gerenciado pelo Coolify** como recurso separado (tem backup
-  agendado para S3 na interface). Nesse caso remova o serviço `postgres` do
-  compose e aponte `DATABASE_URL` para o host interno do banco gerenciado. O
-  usuário informado precisa poder criar o papel `content_pilot_tenant` — o
-  `postgres` superusuário serve.
-
-Teste a restauração antes de abrir o cadastro ao público.
-
-## Atualizar a aplicação
-
-```bash
-cd /opt/content-pilot
-git pull
-docker compose -f docker-compose.prod.yml up -d --build
-```
-O `migrate` aplica novas migrations antes de web/worker subirem.
-
-## Backup do banco (diário)
-
-```bash
-# /etc/cron.d/content-pilot-backup
-0 4 * * * root docker exec $(docker ps -qf name=postgres) pg_dump -U contentpilot contentpilot | gzip > /opt/backups/content-pilot-$(date +\%u).sql.gz
-```
-Mantém 7 dias em rotação (`%u` = dia da semana). Restaurar:
-```bash
-gunzip -c backup.sql.gz | docker exec -i $(docker ps -qf name=postgres) psql -U contentpilot contentpilot
-```
-
-## Rotação da master key do vault
-
-1. Gere `k2` e adicione ao `.env` **sem remover a k1**:
-   `VAULT_MASTER_KEYS=k1:<antiga>,k2:<nova>` e `VAULT_ACTIVE_KEY_ID=k2`
-2. Recrie os serviços: `docker compose -f docker-compose.prod.yml up -d`
-3. Novas credenciais passam a usar k2; as antigas continuam legíveis pela k1. Para migrar as antigas, re-salve cada credencial no painel (excluir/recriar) e então remova `k1:` do `.env`.
-4. As credenciais da **plataforma** também precisam ser re-salvas: `/admin/ai/keys` e `/admin/settings`. Basta colar a chave de novo — o formulário regrava com a chave ativa.
-
-## E-mail transacional (Resend)
-
-Usado em dois lugares: recuperação de senha e confirmação de e-mail. Sem ele o
-produto funciona, mas quem esquecer a senha depende de você mexer no banco.
-
-1. Crie uma API key em `resend.com/api-keys` com permissão de envio.
-2. Verifique o domínio do remetente no Resend (DNS). **Chave válida com domínio
-   não verificado é o erro mais comum:** a API aceita a chave e recusa o envio
-   com 403.
-3. Configure em `/admin/settings` → Chave do Resend e Remetente. As variáveis
-   `RESEND_API_KEY` e `EMAIL_FROM` do ambiente valem como reserva, campo a
-   campo, igual ao Stripe.
-
-O painel avisa em `/admin/settings` quando o envio não está configurado. O
-aviso de "confirme seu e-mail" no painel do usuário só aparece quando há como
-enviar — avisar sem poder reenviar seria pedir uma ação impossível.
-
-**A resposta de `/forgot-password` é sempre a mesma**, exista a conta ou não,
-esteja o Resend no ar ou não. Isso é proposital: qualquer diferença
-transformaria o formulário num verificador de quem tem conta na instalação. Para
-saber se um envio falhou, leia o log do serviço web (`[email:password-reset]`).
-
-Contas suspensas ou banidas não recebem link de recuperação — devolver o acesso
-por e-mail desfaria a moderação.
-
-Trocar a senha encerra as sessões abertas em outros aparelhos (`users.sessions_valid_from`).
-Como a sessão é JWT e não existe tabela de sessões para apagar, é esse carimbo
-que faz a troca valer: sem ele, quem tivesse roubado a conta continuaria dentro
-depois da troca.
+Aponte um monitor externo (UptimeRobot, Better Stack, healthchecks.io) para
+essa URL — é o que gera alerta de verdade.
 
 ## Segredos: cofre x .env
 
@@ -304,6 +181,38 @@ Os limites de `packages/core/src/billing/plans.ts` se dividem em dois grupos:
 - **Estrutural** (sites, autopilots): medem o que roda no nosso worker e valem para todos, BYOK ou não. Um autopilot ativo executa sozinho pelo scheduler, sem ninguém pedir; é o limite que protege o servidor. Somente o workspace da sua conta ativa (`ADMIN_EMAIL`) pode usar chaves do sistema. Isenção de cotas, cargo de admin ou plano pago não dão essa permissão. A identidade é revalidada no worker, inclusive nas automações. Se o workspace tiver mais de uma conta não excluída, o acesso global é bloqueado.
 
 Consulte o [relatório de lançamento](launch-review.md) para limitações, opções de hospedagem e validações ainda necessárias.
+
+## Antes de executar: o que o painel bloqueia
+
+O pipeline falhava só durante a execução: o run nascia, ficava "Executando" e
+morria com `HTTP 400` ou "nenhuma credencial" — já com crédito de busca gasto e
+sem dizer o que consertar.
+
+Agora `getWorkspaceReadiness` decide isso antes, a partir do banco local (sem
+chamar provedor nenhum, em milissegundos) e confere:
+
+- cada etapa do perfil tem modelo configurado;
+- existe credencial do provedor que a etapa resolve (chave da plataforma só
+  conta para o dono da instalação — a mesma regra do worker);
+- o modelo está no `model_catalog` daquele provedor e marcado como disponível;
+- o modelo de `illustrate` aceita imagem;
+- existe chave Tavily e ao menos um site conectado.
+
+O resultado vira um aviso com link de conserto no topo de Autopilot e Jobs, e
+desabilita os botões de execução. **O bloqueio de verdade é no servidor**:
+`assertWorkspaceReady` roda dentro de `runJobNowAction`,
+`runAutopilotNowAction` e `generateTopicNowAction`, então chamar a action
+direto também é recusado.
+
+O `preflightLlmTasks` do worker continua existindo e é complementar: ele fala
+com o provedor de verdade e pega o que só a API sabe — chave revogada, modelo
+removido depois da última sincronização do catálogo.
+
+**Catálogo vazio.** Sem catálogo não há como conferir modelo nem escolher outro
+em `/admin/ai/profiles`. Ele sincronizava só às 3h ou por clique manual, o que
+deixava uma instalação nova sem opção alguma justamente durante a configuração.
+Agora o worker sincroniza no boot quando a tabela está vazia — o endpoint de
+listagem do OpenRouter é público e funciona sem chave.
 
 ## Id de modelo: formato do OpenRouter x nativo
 

@@ -12,6 +12,7 @@ import {
 } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
+import { assertWorkspaceReady } from '@/lib/readiness';
 import { getWorkspacePlan } from '@/lib/billing';
 import { getBoss } from '@/lib/boss';
 import { assertTemplateAccessible } from '@/lib/tenant';
@@ -229,7 +230,8 @@ export async function deleteAutopilotAction(input: unknown): Promise<ActionResul
  * O run leva o autopilotConfigId — o custo conta no orçamento mensal da config.
  */
 export async function generateTopicNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
-  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
+  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId, email }) => {
+    await assertWorkspaceReady(workspaceId, email);
     const db = getTenantDb(workspaceId);
     const [topic] = await db
       .select()
@@ -329,7 +331,8 @@ export async function dismissTopicAction(input: unknown): Promise<ActionResult> 
 }
 
 export async function runAutopilotNowAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
-  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId }) => {
+  return runAuthedAction(idSchema, input, async ({ id }, { workspaceId, email }) => {
+    await assertWorkspaceReady(workspaceId, email);
     const db = getTenantDb(workspaceId);
     const [cfg] = await db
       .select({ id: autopilotConfigs.id })

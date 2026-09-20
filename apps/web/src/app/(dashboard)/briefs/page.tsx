@@ -16,11 +16,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { requireSession } from '@/lib/auth';
+import { getWorkspaceReadiness } from '@/lib/readiness';
+import { ReadinessAlert } from '@/components/readiness-alert';
 
 export const metadata = { title: 'Criar posts' };
 
 export default async function BriefsPage() {
-  const { workspaceId } = await requireSession();
+  const { workspaceId, email } = await requireSession();
+  const readiness = await getWorkspaceReadiness(workspaceId, email);
   const db = getTenantDb(workspaceId);
   const [t, locale] = await Promise.all([getTranslations('briefs'), getLocale()]);
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
@@ -75,6 +78,7 @@ export default async function BriefsPage() {
       <PageHeader title={t('title')} description={t('description')}>
         <CreateBriefDialog sites={siteRows} templates={templateRows} />
       </PageHeader>
+      <ReadinessAlert issues={readiness.issues} />
       {briefRows.length === 0 ? (
         <EmptyState icon={PenLine} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (

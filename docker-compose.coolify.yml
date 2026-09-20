@@ -83,6 +83,16 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    # Sem isto o container não declara saúde alguma, e o Coolify agrega o
+    # recurso inteiro como "unknown" mesmo com web e banco saudáveis. A
+    # checagem é real: confirma que o scheduler.tick concluiu há menos de
+    # 3 minutos, não que o processo está vivo.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped
 
 volumes:

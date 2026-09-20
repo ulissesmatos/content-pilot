@@ -75,7 +75,7 @@ export default async function OverviewPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
         <StatCard title={t('statSites')} value={String(siteCount?.value ?? 0)} icon={Globe} />
         <StatCard title={t('statRuns7d')} value={String(runCount?.value ?? 0)} icon={History} />
         <StatCard

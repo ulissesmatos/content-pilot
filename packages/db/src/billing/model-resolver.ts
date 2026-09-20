@@ -21,6 +21,7 @@ export interface ResolvedModel {
   model: string;
   maxTokens?: number;
   profileSlug: string;
+  purpose: LlmPurpose;
 }
 
 export interface ModelProfileWithEntries {
@@ -106,5 +107,6 @@ export async function resolveTaskModel(
     model: entry.modelId,
     maxTokens: entry.maxTokens ?? undefined,
     profileSlug: profile.slug,
+    purpose,
   };
 }

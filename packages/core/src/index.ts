@@ -20,6 +20,7 @@ export * from './html/inline-images';
 export * from './images/openverse';
 export * from './images/web-images';
 export * from './images/illustrate';
+export * from './images/generate';
 export * from './search/normalize';
 export * from './search/tavily';
 export * from './search/select-sources';

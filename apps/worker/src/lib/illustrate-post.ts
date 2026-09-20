@@ -7,6 +7,7 @@ import {
   WebImageSearchClient,
   type ChosenImage,
   type CmsAdapter,
+  type ImageGenClient,
   type ImageSearchClient,
   type InlineImage,
   type LlmCallRecord,
@@ -35,6 +36,8 @@ export async function illustratePost(opts: {
   search?: SearchClient;
   /** Desliga a busca de imagens na web (fica só o Openverse). */
   webSearch?: boolean;
+  /** Último recurso: gera a capa com IA quando nenhuma candidata passa na revisão de qualidade. */
+  imageGen?: ImageGenClient;
   checkBudget?: () => Promise<void> | void;
   log?: (msg: string) => void;
 }): Promise<{ mediaId: number | null; inlineImages: InlineImage[]; llmCalls: LlmCallRecord[] }> {
@@ -56,6 +59,7 @@ export async function illustratePost(opts: {
     {
       images: combineImageClients(providers),
       llmVision: opts.llmVision,
+      imageGen: opts.imageGen,
       checkBudget: opts.checkBudget,
       log,
     },
@@ -99,7 +103,8 @@ async function uploadImage(
   topic: string,
   log: (msg: string) => void,
 ): Promise<{ id: number; sourceUrl: string } | null> {
-  const downloaded = await downloadImage(img.url);
+  // capa gerada por IA: bytes já prontos, sem download por URL
+  const downloaded = img.inlineData ?? (await downloadImage(img.url));
   if (!downloaded) {
     log(`ilustração: download falhou (${img.url.slice(0, 80)})`);
     return null;

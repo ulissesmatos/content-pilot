@@ -19,3 +19,4 @@ export * from './model-catalog';
 export * from './model-profiles';
 export * from './post-source-state';
 export * from './source-cache';
+export * from './workspace-ai-settings';

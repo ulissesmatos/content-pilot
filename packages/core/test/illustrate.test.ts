@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { illustrate, type IllustrateDeps } from '../src/images/illustrate';
 import type { ImageCandidate, ImageSearchClient } from '../src/images/openverse';
+import type { ImageGenClient } from '../src/images/generate';
 import type { LlmCompleteRequest, LlmCompleteResult, LlmProvider } from '../src/llm/types';
 
 function fakeImages(n: number): ImageSearchClient {
@@ -44,10 +45,25 @@ function fakeVision(
   };
 }
 
-const coverJson = (index: number, alt = '', inline: Array<{ index: number; alt: string }> = []) =>
-  JSON.stringify({ cover: { index, alt }, inline, reason: 'teste' });
+const coverJson = (
+  index: number,
+  alt = '',
+  inline: Array<{ index: number; alt: string }> = [],
+  qualityOk?: boolean,
+) => JSON.stringify({ cover: { index, alt, ...(qualityOk === undefined ? {} : { qualityOk }) }, inline, reason: 'teste' });
 
 const input = { topic: 'GTA 6', keywords: ['gta 6 trailer'], language: 'pt-BR', maxCandidates: 4 };
+
+function fakeImageGen(result: { data: Uint8Array; mimeType: string } | null): ImageGenClient & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    async generate(prompt) {
+      calls.push(prompt);
+      return result;
+    },
+  };
+}
 
 describe('illustrate', () => {
   it('escolhe a capa indicada e gera alt', async () => {
@@ -119,6 +135,53 @@ describe('illustrate', () => {
     expect(res.status).toBe('ok');
     expect(res.cover?.url).toBe('https://img.example/1.jpg');
     expect(res.cover?.alt).toBe('Antigo');
+  });
+
+  it('qualityOk=false reprova a capa mesmo com índice válido → none_relevant sem gerador', async () => {
+    const deps: IllustrateDeps = {
+      images: fakeImages(3),
+      llmVision: fakeVision([{ text: coverJson(1, 'boa imagem mas com marca d\'água', [], false) }]),
+    };
+    const res = await illustrate(input, deps);
+    expect(res.status).toBe('none_relevant');
+    expect(res.cover).toBeNull();
+  });
+
+  it('qualityOk=false + imageGen configurado → gera capa com IA', async () => {
+    const imageGen = fakeImageGen({ data: new Uint8Array([1, 2, 3]), mimeType: 'image/png' });
+    const deps: IllustrateDeps = {
+      images: fakeImages(3),
+      llmVision: fakeVision([{ text: coverJson(1, 'reprovada', [], false) }]),
+      imageGen,
+    };
+    const res = await illustrate(input, deps);
+    expect(res.status).toBe('ok');
+    expect(res.coverGenerated).toBe(true);
+    expect(res.cover?.provider).toBe('openai-generated');
+    expect(res.cover?.inlineData?.data).toEqual(new Uint8Array([1, 2, 3]));
+    expect(imageGen.calls).toHaveLength(1);
+  });
+
+  it('sem candidatas + imageGen configurado → gera capa com IA em vez de no_candidates', async () => {
+    const imageGen = fakeImageGen({ data: new Uint8Array([9]), mimeType: 'image/png' });
+    const deps: IllustrateDeps = { images: fakeImages(0), imageGen, llmVision: fakeVision([{ text: '{}' }]) };
+    const res = await illustrate(input, deps);
+    expect(res.status).toBe('ok');
+    expect(res.coverGenerated).toBe(true);
+    // não gasta a chamada de visão à toa — nem há candidata para mostrar
+    expect((deps.llmVision as ReturnType<typeof fakeVision>).calls.length).toBe(0);
+  });
+
+  it('geração de IA falha (retorna null) → cai no comportamento padrão (none_relevant)', async () => {
+    const imageGen = fakeImageGen(null);
+    const deps: IllustrateDeps = {
+      images: fakeImages(3),
+      llmVision: fakeVision([{ text: coverJson(-1) }]),
+      imageGen,
+    };
+    const res = await illustrate(input, deps);
+    expect(res.status).toBe('none_relevant');
+    expect(res.coverGenerated).toBe(false);
   });
 
   it('sem candidatas → no_candidates (nem chama o LLM)', async () => {

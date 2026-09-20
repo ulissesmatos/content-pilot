@@ -1,6 +1,7 @@
 import { desc, eq } from 'drizzle-orm';
 import { KeyRound } from 'lucide-react';
-import { credentials, getTenantDb } from '@content-pilot/db';
+import { credentials, getTenantDb, getWorkspaceAiSettings } from '@content-pilot/db';
+import { AiSettingsCard } from '@/components/credentials/ai-settings-card';
 import { CreateCredentialDialog } from '@/components/credentials/create-credential-dialog';
 import { credentialTypeLabel } from '@/components/credentials/credential-type';
 import { DeleteCredentialButton } from '@/components/credentials/delete-credential-button';
@@ -27,18 +28,25 @@ export default async function CredentialsPage() {
   const dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' });
   // Só as credenciais do próprio workspace: as chaves da plataforma são
   // gerenciadas em /admin/ai/keys e não aparecem no painel do cliente.
-  const rows = await getTenantDb(workspaceId)
-    .select({
-      id: credentials.id,
-      type: credentials.type,
-      name: credentials.name,
-      maskedHint: credentials.maskedHint,
-      lastUsedAt: credentials.lastUsedAt,
-      createdAt: credentials.createdAt,
-    })
-    .from(credentials)
-    .where(eq(credentials.workspaceId, workspaceId))
-    .orderBy(desc(credentials.createdAt));
+  const db = getTenantDb(workspaceId);
+  const [rows, aiSettings] = await Promise.all([
+    db
+      .select({
+        id: credentials.id,
+        type: credentials.type,
+        name: credentials.name,
+        maskedHint: credentials.maskedHint,
+        lastUsedAt: credentials.lastUsedAt,
+        createdAt: credentials.createdAt,
+      })
+      .from(credentials)
+      .where(eq(credentials.workspaceId, workspaceId))
+      .orderBy(desc(credentials.createdAt)),
+    getWorkspaceAiSettings(db, workspaceId),
+  ]);
+  const llmProviders = (['anthropic', 'openai', 'openrouter'] as const).filter((p) =>
+    rows.some((r) => r.type === p),
+  );
 
   return (
     <>
@@ -46,6 +54,12 @@ export default async function CredentialsPage() {
         <CreateCredentialDialog />
       </PageHeader>
       {!isSuperAdmin ? <p className="text-muted-foreground mb-6 text-sm">{t('ownKeysNotice')}</p> : null}
+      <AiSettingsCard
+        availableProviders={llmProviders}
+        initialProvider={aiSettings?.provider ?? null}
+        initialModel={aiSettings?.model ?? null}
+        initialImageGenModel={aiSettings?.imageGenModel ?? null}
+      />
       {rows.length === 0 ? (
         <EmptyState icon={KeyRound} title={t('emptyTitle')} description={t('emptyDescription')} />
       ) : (

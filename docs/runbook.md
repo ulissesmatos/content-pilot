@@ -331,6 +331,25 @@ número que não esteja no rascunho nem nas fontes, texto entre 80% e 190% do
 original, títulos preservados, blocos Gutenberg balanceados. Senão fica o
 original, e o motivo vai para o log e para `briefs.editorial_report`.
 
+**Título.** Depois de revisar, o revisor relê o título com o texto final e devolve o mesmo
+(se já casa) ou um novo. O novo passa por guardas em código (`acceptTitle`): uma linha sem
+marcação, dentro de `validation.titleMin`/`titleMax` do template, no mesmo assunto (divide ao
+menos uma palavra significativa com o tema ou o título atual), sem número que não esteja no
+texto nem nas fontes, e pela guarda de estilo (travessão, data). Só vale quando a revisão do
+texto também foi aceita: um título pensado para um texto descartado não serve ao original. A
+troca (de, para e o porquê) aparece na prévia, no cartão "Revisão editorial".
+
+**Tema sugerido é um norte.** Quando a pauta nasce da descoberta do autopilot (existe uma
+linha em `discovered_topics` apontando para ela), o redator recebe em runtime a orientação de
+ler as fontes primeiro e, se a sugestão for fraca, errada ou não fizer sentido, ajustar o
+enfoque e o título dentro do mesmo assunto central, sem trocar de tema. Junto vão os títulos
+que o blog já tem e são parecidos, para o ajuste não cair em assunto já coberto. Quando ele
+ajusta, começa `changesSummary` com "Enfoque ajustado:" e o motivo, que aparece na prévia. Pauta
+digitada por uma pessoa mantém o assunto pedido (só o título acompanha o texto). Template de
+dados estruturados (códigos, cupons) nunca recebe essa liberdade. A regra entra em runtime
+(`text/topic-guidance.ts`), então vale também para templates clonados. Se o título final ainda
+sair muito parecido com um post existente, o log avisa.
+
 Sem a etapa `review` configurada num perfil, o worker pula a revisão e o post sai
 igual. Nas instalações existentes o seed cria a etapa em cada perfil no próximo
 deploy, com o provedor do próprio perfil.

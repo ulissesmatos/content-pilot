@@ -567,6 +567,8 @@
     "imagesTotal": "{count, plural, one {# imagem} other {# imagens}}",
     "imagesReal": "{count, plural, one {# real} other {# reais}}",
     "imagesGenerated": "{count, plural, one {# gerada por IA} other {# geradas por IA}}",
-    "postUnavailable": "O texto não carregou agora, então não há prévia. Use \"Abrir no WordPress\" para ver o post."
+    "postUnavailable": "O texto não carregou agora, então não há prévia. Use \"Abrir no WordPress\" para ver o post.",
+    "angleAdjusted": "Enfoque ajustado",
+    "titleAdjusted": "Título ajustado para casar com o texto"
   }
 }

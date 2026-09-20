@@ -55,6 +55,8 @@ interface World {
   imageGen: ImageGenClient | null;
   imageUrls: string[];
   templateConfig: unknown;
+  /** Títulos que o blog já tem publicados (o anti-repetição e a orientação do tema os leem). */
+  wpTitles: string[];
 }
 const world: World = {
   llm: () => ({}),
@@ -64,6 +66,7 @@ const world: World = {
   imageGen: null,
   imageUrls: [],
   templateConfig: null,
+  wpTitles: [],
 };
 
 vi.mock('../src/lib/resolve', () => {
@@ -111,7 +114,7 @@ vi.mock('../src/lib/resolve', () => {
     resolveWordPressAdapter: async (): Promise<CmsAdapter> =>
       ({
         async listRecentPostTitles() {
-          return [];
+          return world.wpTitles.map((title, i) => ({ id: i + 1, title, slug: `s${i}`, link: `https://blog.example/p/${i}` }));
         },
         async listCategories() {
           return [];
@@ -212,11 +215,14 @@ const TOPICS = [
   'calendário de eventos sazonais do Free Fire',
   'controles parentais nos consoles de nova geração',
   'ranking competitivo de Valorant nesta temporada',
+  'cronograma de torneios de League of Legends no segundo semestre',
+  'precos dos planos do servico de assinatura Game Pass',
+  'melhores configuracoes graficas para rodar Cyberpunk no notebook',
 ];
 let topicCursor = 0;
 
-async function newBrief(publishMode: 'draft' | 'publish' = 'draft') {
-  const topic = TOPICS[topicCursor++ % TOPICS.length]!;
+async function newBrief(publishMode: 'draft' | 'publish' = 'draft', explicitTopic?: string) {
+  const topic = explicitTopic ?? TOPICS[topicCursor++ % TOPICS.length]!;
   const siteId = randomUUID();
   const templateId = randomUUID();
   const briefId = randomUUID();
@@ -227,7 +233,7 @@ async function newBrief(publishMode: 'draft' | 'publish' = 'draft') {
     id: briefId, workspaceId: ws, siteId, templateId, topic, keywords: ['roblox chat'], publishMode, status: 'queued',
   });
   await db.insert(dbMod.runs).values({ id: runId, workspaceId: ws, briefId, trigger: 'manual', status: 'running' });
-  return { briefId, runId };
+  return { briefId, runId, siteId, templateId };
 }
 
 const describeIf = enabled ? describe : describe.skip;
@@ -258,7 +264,7 @@ describeIf('handleBriefGenerate (Postgres real, provedores falsos)', () => {
 
   afterAll(async () => {
     if (!db) return;
-    for (const t of ['llm_calls', 'run_logs', 'run_items', 'runs', 'briefs', 'sites', 'content_templates', 'subscriptions']) {
+    for (const t of ['llm_calls', 'run_logs', 'run_items', 'runs', 'discovered_topics', 'briefs', 'autopilot_configs', 'sites', 'content_templates', 'subscriptions']) {
       if (t === 'run_logs') {
         await db.execute(dbMod.sql`delete from run_logs where run_id in (select id from runs where workspace_id = ${ws}::uuid)`);
       } else {
@@ -272,7 +278,7 @@ describeIf('handleBriefGenerate (Postgres real, provedores falsos)', () => {
 
   beforeEach(async () => {
     net.clear();
-    Object.assign(world, { llmCalls: [], posts: [], uploads: [], imageGen: null, imageUrls: [] });
+    Object.assign(world, { llmCalls: [], posts: [], uploads: [], imageGen: null, imageUrls: [], wpTitles: [] });
     const { parseTemplateConfig, genericArticleTemplate } = await import('@content-pilot/core');
     world.templateConfig = parseTemplateConfig(genericArticleTemplate.config);
     scriptedLlm();
@@ -447,5 +453,100 @@ describeIf('handleBriefGenerate (Postgres real, provedores falsos)', () => {
     const lines = (await db.select().from(dbMod.runLogs).where(dbMod.eq(dbMod.runLogs.runId, runId))).map((l) => l.line);
     const st = Object.fromEntries(deriveStages(lines, 'success', 'create').map((x) => [x.key, x.status]));
     expect(st).toMatchObject({ revisao: 'skipped', embeds: 'skipped', imagens: 'done', publicacao: 'done' });
+  });
+
+  it('o revisor troca o título para casar com o texto revisado, e isso fica registrado', async () => {
+    const prompts: string[] = [];
+    scriptedLlm({
+      content_pilot_update: (req) => {
+        prompts.push(req.prompt);
+        return generation();
+      },
+      content_pilot_review: () => ({
+        revisedHtml: REVISED_HTML,
+        revisedTitle: 'Como ativar o chat entre amigos do Roblox e limitar quem fala com os filhos',
+        titleReason: 'o texto revisado foca em ativar o recurso e nos controles dos pais',
+        changes: [{ kind: 'other', section: 'título', note: 'o título passou a descrever o que o texto entrega' }],
+        imageHints: [],
+      }),
+    });
+    const { briefId, runId } = await newBrief('draft');
+    await handle(db, { briefId, runId });
+
+    // tema digitado por uma pessoa: o assunto é mantido, e o redator NÃO recebe a liberdade de trocar o enfoque
+    expect(prompts[0]).toMatch(/foi pedido por uma pessoa/);
+    expect(prompts[0]).not.toMatch(/NORTE, NÃO UMA ORDEM/);
+
+    // o post foi criado com o título do revisor (já passado pela guarda de estilo)
+    expect(world.posts[0]!.title).toBe('Como ativar o chat entre amigos do Roblox e limitar quem fala com os filhos');
+    const [brief] = await db.select().from(dbMod.briefs).where(dbMod.eq(dbMod.briefs.id, briefId));
+    const editorial = brief!.editorialReport as { title: { from: string; to: string; reason: string } | null; angle: string | null };
+    expect(editorial.title).toEqual({
+      from: 'Como funciona a nova aba de chat entre amigos do Roblox: recursos e como testar',
+      to: 'Como ativar o chat entre amigos do Roblox e limitar quem fala com os filhos',
+      reason: 'o texto revisado foca em ativar o recurso e nos controles dos pais',
+    });
+    expect(editorial.angle).toBeNull();
+
+    // o histórico da execução guarda o título que foi ao ar
+    const items = await db.select().from(dbMod.runItems).where(dbMod.eq(dbMod.runItems.runId, runId));
+    expect(items[0]!.postTitle).toBe('Como ativar o chat entre amigos do Roblox e limitar quem fala com os filhos');
+  });
+
+  it('tema da descoberta é um norte: o redator pode ajustar o enfoque, e o porquê fica no relatório', async () => {
+    world.wpTitles = ['Como assistir aos campeonatos da temporada'];
+    const prompts: string[] = [];
+    scriptedLlm({
+      content_pilot_update: (req) => {
+        prompts.push(req.prompt);
+        return {
+          ...generation(),
+          newTitle: 'Campeonatos de esports de setembro ainda sem calendário fechado: o que já se sabe',
+          changesSummary: 'Enfoque ajustado: as fontes mostram que o calendário ainda não foi divulgado, então o texto reúne o que já foi confirmado.',
+        };
+      },
+    });
+    // tema explícito: precisa ter um pouco de parentesco com o título que o blog já tem para entrar na lista de "já cobertos"
+    const { briefId, runId, siteId, templateId } = await newBrief('draft', 'calendario de campeonatos de esports em setembro');
+    // a pauta nasceu da descoberta do autopilot
+    const apId = randomUUID();
+    await db.insert(dbMod.autopilotConfigs).values({
+      id: apId, workspaceId: ws, siteId, templateId, name: 'AP', seedTopics: ['x'], scheduleCron: '0 * * * *', discovery: {}, llmConfig: {}, limits: {},
+    });
+    await db.insert(dbMod.discoveredTopics).values({
+      workspaceId: ws, autopilotConfigId: apId, topic: 'tema descoberto', contentType: 'evergreen', status: 'queued', briefId,
+    });
+
+    await handle(db, { briefId, runId });
+
+    // o redator recebeu a liberdade, a marca para deixar rastro e o que o blog já cobriu
+    expect(prompts[0]).toMatch(/NORTE, NÃO UMA ORDEM/);
+    expect(prompts[0]).toContain('Enfoque ajustado:');
+    expect(prompts[0]).toContain('Como assistir aos campeonatos da temporada');
+
+    // o título que o redator escolheu depois de ler as fontes é o que vai ao ar
+    expect(world.posts[0]!.title).toBe('Campeonatos de esports de setembro ainda sem calendário fechado: o que já se sabe');
+    const [brief] = await db.select().from(dbMod.briefs).where(dbMod.eq(dbMod.briefs.id, briefId));
+    const editorial = brief!.editorialReport as { angle: string | null; title: unknown };
+    expect(editorial.angle).toMatch(/calendário ainda não foi divulgado/);
+    expect(editorial.title).toBeNull(); // o revisor não mexeu
+  });
+
+  it('título proposto pelo revisor com número inventado é descartado: fica o do redator', async () => {
+    scriptedLlm({
+      content_pilot_review: () => ({
+        revisedHtml: REVISED_HTML,
+        revisedTitle: '99 segredos do chat entre amigos do Roblox',
+        titleReason: 'mais atraente',
+        changes: [],
+        imageHints: [],
+      }),
+    });
+    const { briefId, runId } = await newBrief('draft');
+    await handle(db, { briefId, runId });
+    expect(world.posts[0]!.title).toBe('Como funciona a nova aba de chat entre amigos do Roblox: recursos e como testar');
+    expect(world.posts[0]!.content).toContain('Os pais podem limitar');
+    const [brief] = await db.select().from(dbMod.briefs).where(dbMod.eq(dbMod.briefs.id, briefId));
+    expect((brief!.editorialReport as { title: unknown }).title).toBeNull();
   });
 });

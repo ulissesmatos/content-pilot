@@ -293,8 +293,12 @@ async function createBriefFromCandidate(
   candidate: DiscoveryCandidate,
   generationTokenBudget: number,
 ): Promise<string> {
+  // A sugestão é um norte: o redator lê as fontes e pode ajustar o enfoque e o título (ver buildTopicGuidance).
   const extra = [
-    candidate.angle ? `Ângulo editorial: ${candidate.angle}` : '',
+    candidate.angle || candidate.suggestedTitle
+      ? 'Sugestão da descoberta de temas (um norte, não uma ordem; ajuste se as fontes mostrarem que faz mais sentido de outro jeito):'
+      : '',
+    candidate.angle ? `Ângulo editorial sugerido: ${candidate.angle}` : '',
     candidate.suggestedTitle ? `Título sugerido: ${candidate.suggestedTitle}` : '',
     `Tipo de conteúdo: ${candidate.contentType}`,
   ]

@@ -30,6 +30,20 @@ export function ReviewCard({ report }: { report: EditorialReport | null }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        {report?.angle ? (
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium">{t('angleAdjusted')}</p>
+            <p className="text-muted-foreground">{report.angle}</p>
+          </div>
+        ) : null}
+        {report?.title ? (
+          <div className="space-y-0.5">
+            <p className="text-xs font-medium">{t('titleAdjusted')}</p>
+            <p className="text-muted-foreground text-xs line-through decoration-1">{report.title.from}</p>
+            <p className="break-words">{report.title.to}</p>
+            {report.title.reason ? <p className="text-muted-foreground text-xs">{report.title.reason}</p> : null}
+          </div>
+        ) : null}
         {!review ? (
           <p className="text-muted-foreground">{t('reviewNone')}</p>
         ) : (

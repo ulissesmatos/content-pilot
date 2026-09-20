@@ -1,5 +1,5 @@
 import type { EmbedItem } from '../embeds/parse';
-import type { ReviewChange, ReviewResult } from './review';
+import type { ReviewChange, ReviewResult, TitleChange } from './review';
 
 /**
  * O que a etapa editorial e a busca de embeds fizeram no artigo, gravado junto da
@@ -17,6 +17,10 @@ export interface EditorialReport {
   } | null;
   embeds: EmbedItem[];
   embedNotes: string[];
+  /** O revisor trocou o título para casar com o texto final. */
+  title?: TitleChange | null;
+  /** O redator ajustou o enfoque em relação ao tema sugerido: a frase em que ele diz o que mudou e por quê. */
+  angle?: string | null;
 }
 
 /** Todos os resultados possíveis da revisão; a tela precisa de um texto para cada um. */
@@ -56,5 +60,15 @@ export function parseEditorialReport(value: unknown): EditorialReport | null {
       ((e as EmbedItem).kind === 'youtube' || (e as EmbedItem).kind === 'tweet') &&
       typeof (e as EmbedItem).url === 'string',
   );
-  return { review, embeds, embedNotes: strings(v.embedNotes) };
+  const t = v.title;
+  const title =
+    t && typeof t === 'object' && typeof (t as TitleChange).from === 'string' && typeof (t as TitleChange).to === 'string'
+      ? {
+          from: (t as TitleChange).from,
+          to: (t as TitleChange).to,
+          reason: typeof (t as TitleChange).reason === 'string' ? (t as TitleChange).reason : '',
+        }
+      : null;
+  const angle = typeof v.angle === 'string' && v.angle.trim() ? v.angle.trim() : null;
+  return { review, embeds, embedNotes: strings(v.embedNotes), title, angle };
 }

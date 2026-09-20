@@ -17,6 +17,7 @@ export * from './i18n/slug';
 export * from './jobs/cron';
 export * from './html/managed-block';
 export * from './text/style-guard';
+export * from './text/topic-guidance';
 export * from './html/external-links';
 export * from './html/inline-images';
 export * from './html/article-blocks';

@@ -1,6 +1,7 @@
 import { LlmError } from '../llm/client';
 import { extractJson } from '../llm/parse';
 import type { JsonSchema, LlmProvider } from '../llm/types';
+import { titleTokens } from '../autopilot/discover';
 import { applyStyleGuard, buildStyleInstructions, type StylePolicy } from '../text/style-guard';
 import { BudgetExceededError, type LlmCallRecord } from './types';
 
@@ -32,6 +33,14 @@ export interface ImageHint {
   description: string;
 }
 
+/** O revisor achou um título que casa melhor com o texto final. */
+export interface TitleChange {
+  from: string;
+  to: string;
+  /** Uma frase do porquê. */
+  reason: string;
+}
+
 export interface ReviewInput {
   topic: string;
   title: string;
@@ -42,12 +51,18 @@ export interface ReviewInput {
   style: StylePolicy;
   maxTokens: number;
   temperature?: number;
+  /** Limites de tamanho do título (os da validação do template). */
+  titleMin?: number;
+  titleMax?: number;
 }
 
 export interface ReviewResult {
   status: 'revised' | 'unchanged' | 'rejected' | 'failed' | 'budget_exceeded';
   /** HTML final: o revisado quando aceito, o original em qualquer outro caso. */
   html: string;
+  /** Título final: o novo quando o revisor achou um que casa melhor e passou nas guardas; senão o de entrada. */
+  title: string;
+  titleChange: TitleChange | null;
   changes: ReviewChange[];
   imageHints: ImageHint[];
   /** Por que a revisão foi descartada, quando foi. */
@@ -168,6 +183,55 @@ export function acceptRevision(original: string, revised: string, context: strin
   return { ok: true };
 }
 
+/** Resultado da decisão sobre o título: mudou, ou por que não (motivo null = já casava, sem mudança). */
+export type TitleVerdict = { ok: true; title: string } | { ok: false; reason: string | null };
+
+const normTitle = (t: string) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * O título proposto pelo revisor pode entrar? O revisor vê o texto inteiro e é quem melhor sabe
+ * se o título ainda o descreve, mas nada garante que ele não vá trocar de assunto ou enfeitar o
+ * título com um número que o texto não tem. As guardas:
+ *
+ *  - uma linha, sem marcação, dentro do tamanho que o template aceita;
+ *  - continua no mesmo assunto (divide ao menos uma palavra significativa com o tema ou o título atual);
+ *  - nenhum número novo que não esteja no título atual, no texto ou nas fontes;
+ *  - passa pela guarda de estilo (travessão, data decorativa) como qualquer título.
+ */
+export function acceptTitle(
+  current: string,
+  candidate: string,
+  ctx: { topic: string; html: string; context: string; style: StylePolicy; titleMin?: number; titleMax?: number },
+): TitleVerdict {
+  const raw = candidate.trim();
+  if (!raw) return { ok: false, reason: null };
+  if (/[\r\n]/.test(raw) || /[<>]|```/.test(raw) || /^[#*\-]/.test(raw)) {
+    return { ok: false, reason: 'título com quebra de linha ou marcação' };
+  }
+  const unquoted = raw.replace(/\s+/g, ' ').replace(/^["“”']+|["“”']+$/g, '').trim();
+  const styled = applyStyleGuard({ title: unquoted, html: '' }, ctx.style).title.trim();
+  if (!styled || normTitle(styled) === normTitle(current)) return { ok: false, reason: null };
+
+  const min = ctx.titleMin ?? 10;
+  const max = ctx.titleMax ?? 120;
+  if (styled.length < min || styled.length > max) {
+    return { ok: false, reason: `título com ${styled.length} caracteres (o template aceita de ${min} a ${max})` };
+  }
+
+  const subject = new Set([...titleTokens(ctx.topic), ...titleTokens(current)]);
+  if (subject.size > 0) {
+    const shared = [...titleTokens(styled)].filter((t) => subject.has(t));
+    if (shared.length === 0) return { ok: false, reason: 'o novo título mudou de assunto' };
+  }
+
+  const known = new Set([...numbersOf(current), ...numbersOf(ctx.topic), ...numbersOf(textOf(ctx.html)), ...numbersOf(ctx.context)]);
+  const invented = [...numbersOf(styled)].filter((n) => !known.has(n));
+  if (invented.length > 0) {
+    return { ok: false, reason: `o novo título traz um número que não está no texto nem nas fontes: ${invented[0]}` };
+  }
+  return { ok: true, title: styled };
+}
+
 // ---------- prompt e schema ----------
 
 function buildSchema(): JsonSchema {
@@ -188,6 +252,11 @@ function buildSchema(): JsonSchema {
           additionalProperties: false,
         },
       },
+      revisedTitle: {
+        type: 'string',
+        description: 'O título final do artigo. Igual ao atual se ele já descreve o texto; um novo se casa melhor.',
+      },
+      titleReason: { type: 'string', description: 'Uma frase do porquê da mudança de título. Vazio se o título não mudou.' },
       imageHints: {
         type: 'array',
         items: {
@@ -201,7 +270,7 @@ function buildSchema(): JsonSchema {
         },
       },
     },
-    required: ['revisedHtml', 'changes', 'imageHints'],
+    required: ['revisedHtml', 'revisedTitle', 'titleReason', 'changes', 'imageHints'],
     additionalProperties: false,
   };
 }
@@ -231,13 +300,15 @@ O QUE FAZER:
 2. SEÇÕES CURTAS DEMAIS: as que só tocam no assunto. Aprofunde usando SOMENTE fatos que já estão no rascunho ou nas fontes.
 3. CARA DE IA: reescreva aberturas genéricas, frases simétricas em trio, conclusões que só repetem o que foi dito, adjetivos inflados e perguntas retóricas de enchimento. Evite expressões como ${tells}. Escreva como um jornalista do nicho escreveria: direto, específico, com voz.
 4. IMAGENS: diga depois de qual título uma imagem ajudaria o leitor e o que ela deve mostrar. Indique só onde realmente ajuda.
+5. TÍTULO: depois de revisar, releia o título com o texto final na cabeça. Ele descreve exatamente o que o artigo entrega, sem prometer o que o texto não tem? Se sim, devolva-o IGUAL em revisedTitle. Se dá para casar melhor com o texto (mais fiel, mais específico, mais natural, sem sensacionalismo), devolva o novo em revisedTitle e explique em titleReason numa frase. O novo título mantém o assunto, tem entre ${input.titleMin ?? 10} e ${input.titleMax ?? 120} caracteres e não traz números, datas nem nomes que não estejam no texto ou nas fontes.
 
 REGRAS DURAS (a revisão é descartada se alguma for quebrada):
 - Preserve TODOS os blocos Gutenberg, todos os títulos e todos os links <a href> com as MESMAS URLs.
 - NÃO invente números, datas, nomes, citações nem fatos. Se um dado não está no rascunho nem nas fontes, não o escreva.
-- Não encurte o artigo: revisar não é resumir. Sem título dentro do HTML, sem <script>, sem <style>.${style}
+- Não encurte o artigo: revisar não é resumir. Sem título dentro do HTML, sem <script>, sem <style>.
+- O título novo é descartado se mudar de assunto ou trouxer número que não está no texto nem nas fontes.${style}
 
-Devolva SEMPRE o artigo inteiro em revisedHtml (mesmo que mude pouco). Em changes, liste o que mudou e por quê, em frases curtas. Lista vazia é aceitável se o texto já estava bom.`;
+Devolva SEMPRE o artigo inteiro em revisedHtml (mesmo que mude pouco) e o título final em revisedTitle. Em changes, liste o que mudou e por quê, em frases curtas. Lista vazia é aceitável se o texto já estava bom.`;
   }
 
   return `You are the editor-in-chief of a blog. Review the draft below before it is published.
@@ -256,17 +327,21 @@ WHAT TO DO:
 2. THIN SECTIONS: ones that only touch the subject. Deepen them using ONLY facts already in the draft or the sources.
 3. SOUNDS LIKE AI: rewrite generic openers, symmetrical triplets, conclusions that only repeat, inflated adjectives and filler rhetorical questions. Avoid phrases like ${tells}. Write like a niche journalist: direct, specific, with a voice.
 4. IMAGES: say after which heading an image would help the reader and what it should show. Only where it really helps.
+5. TITLE: after reviewing, reread the title with the final text in mind. Does it describe exactly what the article delivers, without promising what the text lacks? If so, return it UNCHANGED in revisedTitle. If it can match the text better (more faithful, more specific, more natural, not sensational), return the new one in revisedTitle and explain in titleReason in one sentence. The new title keeps the subject, is between ${input.titleMin ?? 10} and ${input.titleMax ?? 120} characters and has no numbers, dates or names that are not in the text or the sources.
 
 HARD RULES (the review is discarded if any is broken):
 - Preserve ALL Gutenberg blocks, headings and <a href> links with the SAME URLs.
 - Do NOT invent numbers, dates, names, quotes or facts. If a datum is not in the draft or sources, do not write it.
-- Do not shorten the article: reviewing is not summarizing. No title inside the HTML, no <script>, no <style>.${style}
+- Do not shorten the article: reviewing is not summarizing. No title inside the HTML, no <script>, no <style>.
+- The new title is discarded if it changes subject or has a number that is not in the text or the sources.${style}
 
-ALWAYS return the whole article in revisedHtml (even if little changed). In changes, list what changed and why, in short sentences. An empty list is fine if the text was already good.`;
+ALWAYS return the whole article in revisedHtml (even if little changed) and the final title in revisedTitle. In changes, list what changed and why, in short sentences. An empty list is fine if the text was already good.`;
 }
 
 interface ReviewParsed {
   revisedHtml?: unknown;
+  revisedTitle?: unknown;
+  titleReason?: unknown;
   changes?: Array<{ kind?: unknown; section?: unknown; note?: unknown }>;
   imageHints?: Array<{ afterHeading?: unknown; description?: unknown }>;
 }
@@ -279,6 +354,8 @@ export async function reviewArticle(input: ReviewInput, deps: ReviewDeps): Promi
   const untouched = (patch: Partial<ReviewResult>): ReviewResult => ({
     status: 'unchanged',
     html: input.html,
+    title: input.title,
+    titleChange: null,
     changes: [],
     imageHints: [],
     reason: null,
@@ -360,11 +437,33 @@ export async function reviewArticle(input: ReviewInput, deps: ReviewDeps): Promi
   const verdict = acceptRevision(input.html, revised, input.context);
   if (!verdict.ok) {
     log(`revisão descartada, mantendo o texto original: ${verdict.reason}`);
-    // as dicas de imagem continuam úteis mesmo com a reescrita descartada
+    // As dicas de imagem continuam úteis mesmo com a reescrita descartada. O título proposto
+    // não: ele foi pensado para o texto revisado, e o texto que vale é o original.
     return untouched({ status: 'rejected', reason: verdict.reason, imageHints });
   }
 
-  if (revised === input.html) {
+  // O título é avaliado sobre o texto que de fato vai ao ar (revisado, ou o original se nada mudou).
+  const proposedTitle = typeof parsed?.revisedTitle === 'string' ? parsed.revisedTitle : '';
+  const titleVerdict = acceptTitle(input.title, proposedTitle, {
+    topic: input.topic,
+    html: revised,
+    context: input.context,
+    style: input.style,
+    titleMin: input.titleMin,
+    titleMax: input.titleMax,
+  });
+  let title = input.title;
+  let titleChange: TitleChange | null = null;
+  if (titleVerdict.ok) {
+    title = titleVerdict.title;
+    const reason = String(parsed?.titleReason ?? '').trim();
+    titleChange = { from: input.title, to: title, reason };
+    log(`revisão: título ajustado para casar com o texto: "${input.title}" → "${title}"`);
+  } else if (titleVerdict.reason) {
+    log(`revisão: título proposto descartado (${titleVerdict.reason}); fica "${input.title}"`);
+  }
+
+  if (revised === input.html && !titleChange) {
     log('revisão: o editor não achou o que mudar');
     return untouched({ status: 'unchanged', imageHints });
   }
@@ -373,6 +472,8 @@ export async function reviewArticle(input: ReviewInput, deps: ReviewDeps): Promi
   return {
     status: 'revised',
     html: revised,
+    title,
+    titleChange,
     changes,
     imageHints,
     reason: null,

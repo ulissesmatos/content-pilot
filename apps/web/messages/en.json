@@ -567,6 +567,8 @@
     "imagesTotal": "{count, plural, one {# image} other {# images}}",
     "imagesReal": "{count} real",
     "imagesGenerated": "{count} AI generated",
-    "postUnavailable": "The text did not load right now, so there is no preview. Use \"Open on WordPress\" to see the post."
+    "postUnavailable": "The text did not load right now, so there is no preview. Use \"Open on WordPress\" to see the post.",
+    "angleAdjusted": "Focus adjusted",
+    "titleAdjusted": "Title adjusted to match the text"
   }
 }

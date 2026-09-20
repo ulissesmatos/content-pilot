@@ -1,15 +1,18 @@
 import { assertWorkerWorkspace } from '../lib/tenant';
-import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
+import { briefs, discoveredTopics, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
 import {
   checkTopicAlreadyCovered,
   emptyImageReport,
   findEmbeds,
   injectAfterParagraphs,
   injectEmbeds,
+  isNearDuplicate,
   isReviewEnabled,
   jobLlmConfigSchema,
+  parseAngleNote,
   PlanLimitError,
   publicFetch,
+  relevantTitlesFor,
   resolveEmbedPolicy,
   resolveStylePolicy,
   reviewArticle,
@@ -166,6 +169,21 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         })
       : [];
 
+    // Tema vindo da descoberta automática é um norte: o redator pode ajustar o enfoque e o título se
+    // as fontes mostrarem que a sugestão é fraca. Tema digitado por uma pessoa mantém o assunto.
+    const [discovered] = await db
+      .select({ id: discoveredTopics.id })
+      .from(discoveredTopics)
+      .where(eq(discoveredTopics.briefId, briefId))
+      .limit(1);
+    const topicOrigin = discovered ? 'suggested' : 'requested';
+    // ao mudar o enfoque o redator não pode cair em um assunto que o blog já cobriu
+    const avoidTitles = relevantTitlesFor(
+      [{ topic: brief.topic, contentType: 'evergreen', keywords: [], angle: '', suggestedTitle: brief.topic }],
+      existingTitles,
+      25,
+    );
+
     const keywords = brief.keywords?.length ? `Palavras-chave alvo: ${brief.keywords.join(', ')}.` : '';
     const extra = [keywords, brief.extraInstructions ?? ''].filter(Boolean).join('\n');
 
@@ -180,6 +198,8 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         availableCategories: siteCategories.map((c) => c.name),
         topicOverride: brief.topic,
         extraInstructions: extra,
+        topicOrigin,
+        avoidTitles,
         post: {
           title: brief.topic,
           slug: slugify(brief.topic),
@@ -239,7 +259,8 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     // derruba o post: é polimento.
     let reviewNotes: EditorialReport['review'] = null;
     let imageHints: ImageHint[] = [];
-    const finalTitle = result.newTitle ?? brief.topic;
+    let finalTitle = result.newTitle ?? brief.topic;
+    let titleChange: EditorialReport['title'] = null;
     let reviewedHtml = result.finalHtml;
     if (isReviewEnabled(template.config)) {
       log(stageMarker('revisao'));
@@ -255,11 +276,16 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
             context: result.searchContext,
             style: resolveStylePolicy(template.config),
             maxTokens: template.config.llmDefaults.generateMaxTokens,
+            titleMin: template.config.validation.titleMin,
+            titleMax: template.config.validation.titleMax,
           },
           { llm: llmReview, checkBudget, log },
         );
         result.llmCalls.push(...review.llmCalls);
         reviewedHtml = review.html;
+        // o revisor viu o texto inteiro e pode ter achado um título que casa melhor com ele
+        finalTitle = review.title;
+        titleChange = review.titleChange;
         imageHints = review.imageHints;
         reviewNotes = {
           status: review.status,
@@ -371,6 +397,13 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       log('post NÃO publicado: nenhuma capa foi obtida. Criado como rascunho para você resolver a capa.');
     }
 
+    // Se o redator ajustou o enfoque em relação ao tema sugerido, o porquê fica no relatório.
+    const angle = parseAngleNote(result.changesSummary);
+    if (angle) log(`enfoque ajustado pelo redator: ${angle}`);
+    // O anti-repetição olhou o tema sugerido; um enfoque ajustado pode ter caído em assunto já coberto.
+    const nearDuplicate = isNearDuplicate(finalTitle, existingTitles);
+    if (nearDuplicate) log(`atenção: o título final é muito parecido com um post existente: "${nearDuplicate}"`);
+
     log(stageMarker('publicacao'));
     const created = await wp.createPost({
       title: finalTitle,
@@ -388,7 +421,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         runId,
         workspaceId,
         wpPostId: created.id,
-        postTitle: result.newTitle ?? brief.topic,
+        postTitle: finalTitle,
         status: 'created',
         action: 'generate',
         changesSummary: result.changesSummary,
@@ -409,7 +442,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         createdWpPostId: created.id,
         createdWpPostUrl: created.link,
         imageReport,
-        editorialReport: { review: reviewNotes, embeds: embedItems, embedNotes } satisfies EditorialReport,
+        editorialReport: { review: reviewNotes, embeds: embedItems, embedNotes, title: titleChange, angle } satisfies EditorialReport,
         error: null,
         updatedAt: new Date(),
       })

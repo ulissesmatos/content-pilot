@@ -16,6 +16,7 @@ import {
   type TemplateConfig,
 } from '../templates/schema';
 import { applyStyleGuard, buildStyleInstructions } from '../text/style-guard';
+import { buildTopicGuidance } from '../text/topic-guidance';
 import { stageMarker } from './stages';
 import { validateOutput } from './validate-output';
 import { buildTrimmedContext, prePassCheck } from './pre-pass';
@@ -68,6 +69,13 @@ export interface PipelineInput {
   /** Tópico explícito (pautas); no update é derivado do título pelo template. */
   topicOverride?: string;
   extraInstructions?: string;
+  /**
+   * Quem definiu o tema. 'suggested' (descoberta automática) é um norte que o redator pode
+   * ajustar; 'requested' (pessoa) mantém o assunto. Só vale em `generate` de template de artigo.
+   */
+  topicOrigin?: 'suggested' | 'requested';
+  /** Títulos já cobertos pelo blog: o redator não repete nenhum ao ajustar o enfoque. */
+  avoidTitles?: string[];
 }
 
 interface EnvelopeParsed {
@@ -329,7 +337,13 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
   // Regras de estilo entram em runtime, e não no texto do template: templates
   // clonados guardam o próprio prompt no banco e só assim recebem a regra.
   const stylePolicy = resolveStylePolicy(cfg);
-  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language);
+  // O tema é um norte, não uma ordem: só em artigo novo. Template de dados estruturados (códigos,
+  // cupons) tem o assunto amarrado ao que é extraído, e não pode mudar de enfoque.
+  const topicGuidance =
+    input.mode === 'generate' && !cfg.extraction.enabled
+      ? buildTopicGuidance({ origin: input.topicOrigin ?? 'requested', language, avoidTitles: input.avoidTitles })
+      : '';
+  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language) + topicGuidance;
 
   // 10. Chamada LLM de geração
   if (input.mode === 'generate') log(stageMarker('redacao'));

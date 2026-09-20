@@ -29,7 +29,7 @@
    O serviço `migrate` roda migrations + seed e termina; `web`, `worker` e `caddy` ficam de pé com `restart: unless-stopped`.
 6. Acesse `https://pilot.seudominio.com` e faça login com ADMIN_EMAIL/ADMIN_PASSWORD.
    - **Chaves da plataforma**: `/admin/ai/keys`, exclusivamente para sua conta ativa identificada por `ADMIN_EMAIL`. Todas as outras contas precisam cadastrar chaves próprias em `/credentials`.
-   - O provedor da chave deve corresponder ao perfil padrão em `/admin/ai/profiles` (OpenRouter no seed).
+   - O perfil de sistema padrão em `/admin/ai/profiles` usa OpenAI. Clientes BYOK escolhem seu próprio provedor/modelo em `/credentials` e não são roteados pelo perfil do sistema.
    - WordPress precisa de HTTPS público; URLs locais/privadas, portas personalizadas e redirecionamentos são recusados.
    - **Cobrança** opcional: desativada por padrão. Para ativar checkout, configure Stripe em `/admin/settings` e `BILLING_ENABLED=true`.
    - Credenciais do WordPress continuam por site, em Credenciais.
@@ -229,9 +229,10 @@ O OpenRouter endereça modelos como `fornecedor/modelo` ("openai/gpt-4o-mini").
 As APIs nativas da OpenAI e da Anthropic só aceitam o id nu ("gpt-4o-mini") e
 respondem **HTTP 400 apenas na execução** — o salvamento passa, o job falha.
 
-Os perfis semeados usam ids do OpenRouter, então trocar só o provedor da etapa
-em `/admin/ai/profiles` deixa o id antigo para trás. Foi assim que a falha
-apareceu em produção.
+Os perfis de sistema são semeados com OpenAI como padrão, Anthropic como
+alternativa e OpenRouter como opção explícita. Chaves BYOK não leem esses
+perfis: a seleção feita em `/credentials` é estrita e nunca troca de provedor
+em silêncio.
 
 `checkProviderModel` (em `packages/core/src/llm/model-id.ts`) separa dois casos
 que se escondem atrás da mesma barra:
@@ -239,7 +240,7 @@ que se escondem atrás da mesma barra:
 | Situação | O que é feito |
 |---|---|
 | `openai/gpt-4o-mini` com provedor **openai** — o prefixo só repete o provedor | Prefixo removido. A credencial escolhida é mantida. |
-| `anthropic/claude-x` com provedor **openai** — id de **outro** fornecedor | Não há correção segura: inventar um id nativo seria pior. O salvamento é recusado; numa linha já gravada, o provedor passa a openrouter. |
+| `anthropic/claude-x` com provedor **openai** — id de **outro** fornecedor | Não há correção segura: inventar um id nativo seria pior. O salvamento é recusado; escolha Anthropic ou OpenRouter explicitamente. |
 | Qualquer id com provedor **openrouter** | Intocado — ali o prefixo é o endereço do modelo. |
 
 A regra vale em quatro pontos: no salvamento do perfil do admin, no salvamento

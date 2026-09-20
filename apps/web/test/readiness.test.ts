@@ -104,14 +104,14 @@ test('modelo invalido AINDA e pego quando o catalogo cobre o provedor', async ()
   // "falta credencial", que e o problema mais fundamental e vem antes.
   const orId = randomUUID();
   await db.insert(s.credentials).values({ id: orId, workspaceId: ws, type: 'openrouter', name: 'OR', ciphertext: cred(orId, ws), keyId: 'k1' });
-  await db.execute(s.sql`update workspace_ai_settings set provider = null, model = null where workspace_id = ${ws}::uuid`);
+  await db.execute(s.sql`update workspace_ai_settings set provider = null, model = null, prefer_own_keys = false where workspace_id = ${ws}::uuid`);
   await db.update(s.modelProfileEntries).set({ modelId: 'z-ai/modelo-que-nao-existe' }).where(eq(s.modelProfileEntries.profileId, profileId));
   // O perfil e lido via cachedConfig. No app quem invalida e runAdminAction,
   // que bumpa a versao dentro da transacao da mutacao; aqui escrevemos direto
   // no banco, entao invalidamos na mao para ler o estado novo.
   s.invalidateConfigCache();
   try {
-    const r = await getWorkspaceReadiness(ws, email);
+    const r = await getWorkspaceReadiness(ws, 'owner@example.test');
     assert.ok(
       r.issues.some((i) => i.code === 'model-not-in-catalog' && i.blocking),
       `catalogo cobre openrouter, entao a conclusao e confiavel. issues=${JSON.stringify(r.issues.map((i) => i.code))}`,

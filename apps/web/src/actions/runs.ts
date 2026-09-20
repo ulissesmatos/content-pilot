@@ -82,7 +82,7 @@ export async function retryRunItemAction(input: unknown): Promise<ActionResult<{
     const boss = await getBoss();
     const sent = await boss.send(
       'post.process',
-      { jobId: run.jobId, runId: newRun!.id, wpPostId: item.wpPostId },
+      { jobId: run.jobId, runId: newRun!.id, wpPostId: item.wpPostId, retryRunItemId: item.id },
       { singletonKey: `${newRun!.id}:${item.wpPostId}`, retryLimit: 1, retryDelay: 120, expireInSeconds: 900 },
     );
     if (!sent) {

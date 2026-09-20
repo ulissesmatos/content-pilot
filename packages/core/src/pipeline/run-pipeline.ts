@@ -5,6 +5,7 @@ import { extractJson } from '../llm/parse';
 import { LlmError } from '../llm/client';
 import { managedBlockRenderers } from '../renderers';
 import { buildSearchContext } from '../search/build-context';
+import type { BuildContextResult } from '../search/build-context';
 import { selectSources, type SearchBucket } from '../search/select-sources';
 import { interpolate } from '../templates/interpolate';
 import {
@@ -76,6 +77,15 @@ export interface PipelineInput {
   topicOrigin?: 'suggested' | 'requested';
   /** Títulos já cobertos pelo blog: o redator não repete nenhum ao ajustar o enfoque. */
   avoidTitles?: string[];
+  /** Contexto e rascunho de uma tentativa anterior, usados no retry sem refazer pesquisa. */
+  retryContext?: {
+    searchContext: string;
+    sources: PipelineResult['sources'];
+    sourcesHash: string | null;
+    resultsCount: number;
+    extractedResultsCount: number;
+    draftText?: string | null;
+  };
 }
 
 interface EnvelopeParsed {
@@ -147,6 +157,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     metaDescription: null,
     category: null,
     externalLinks: null,
+    draftText: null,
   };
 
   const finish = (patch: Partial<PipelineResult>): PipelineResult => {
@@ -179,47 +190,55 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     }),
   }));
 
-  // 4. Busca (paralela, tolerante a falha individual)
-  const searchDepth = input.searchDepth ?? (profile === 'eco' ? ECO.searchDepth : 'advanced');
-  const searchOpts = {
-    depth: searchDepth,
-    maxResults: profile === 'eco' ? ECO.maxResults : undefined,
-  };
-  const buckets: SearchBucket[] = await Promise.all(
-    queries.map(async (q) => {
-      log(`busca [${q.name}] (${searchDepth}): ${q.query}`);
-      const res = await deps.search.search(q.query, searchOpts);
-      if (res.error) log(`busca [${q.name}] falhou: ${res.error}`);
-      return { name: q.name, query: q.query, results: res.results };
-    }),
-  );
-
-  // 5. Seleção de fontes
-  const selection = selectSources(buckets, cfg.sources);
-  log(`fontes: ${selection.candidates.length} selecionadas de ${selection.totalMergedResultsCount} únicas`);
-
-  // 6. Hash das fontes → skip antes de gastar Extract/LLM
-  const sourcesHash = sha256(
-    selection.candidates
-      .map((c) => c.key + '\n' + c.searchText)
-      .sort()
-      .join('\n---\n'),
-  );
-  if (input.mode === 'update' && (await deps.shouldSkipSources?.(sourcesHash))) {
-    return finish({
-      status: 'skipped_sources_unchanged',
-      sourcesHash,
-      skipReason: 'fontes inalteradas desde a última execução',
-    });
+  // 4-7. Busca e contexto. Um retry recebe o contexto persistido e não cobra
+  // novamente pesquisa/extract; só a etapa de redação é refeita.
+  let context: BuildContextResult;
+  let sourcesHash: string;
+  if (input.retryContext) {
+    context = {
+      searchContext: input.retryContext.searchContext,
+      sources: input.retryContext.sources,
+      resultsCount: input.retryContext.resultsCount,
+      extractedResultsCount: input.retryContext.extractedResultsCount,
+    };
+    sourcesHash = input.retryContext.sourcesHash ?? sha256(input.retryContext.searchContext);
+    log('retry: contexto de fontes reaproveitado; pesquisa não repetida');
+  } else {
+    const searchDepth = input.searchDepth ?? (profile === 'eco' ? ECO.searchDepth : 'advanced');
+    const searchOpts = {
+      depth: searchDepth,
+      maxResults: profile === 'eco' ? ECO.maxResults : undefined,
+    };
+    const buckets: SearchBucket[] = await Promise.all(
+      queries.map(async (q) => {
+        log(`busca [${q.name}] (${searchDepth}): ${q.query}`);
+        const res = await deps.search.search(q.query, searchOpts);
+        if (res.error) log(`busca [${q.name}] falhou: ${res.error}`);
+        return { name: q.name, query: q.query, results: res.results };
+      }),
+    );
+    const selection = selectSources(buckets, cfg.sources);
+    log(`fontes: ${selection.candidates.length} selecionadas de ${selection.totalMergedResultsCount} únicas`);
+    sourcesHash = sha256(
+      selection.candidates
+        .map((c) => c.key + '\n' + c.searchText)
+        .sort()
+        .join('\n---\n'),
+    );
+    if (input.mode === 'update' && (await deps.shouldSkipSources?.(sourcesHash))) {
+      return finish({
+        status: 'skipped_sources_unchanged',
+        sourcesHash,
+        skipReason: 'fontes inalteradas desde a última execução',
+      });
+    }
+    let extractResults: Awaited<ReturnType<NonNullable<PipelineDeps['extract']>>> = [];
+    if (profile === 'full') {
+      const extractFn = deps.extract ?? (async (urls: string[]) => (await deps.search.extract(urls)).results);
+      extractResults = await extractFn(selection.candidates.map((c) => c.url));
+    }
+    context = buildSearchContext(selection.candidates, extractResults, cfg.sources);
   }
-
-  // 7. Contexto — eco pula o Tavily Extract e usa o raw_content da própria busca
-  let extractResults: Awaited<ReturnType<NonNullable<PipelineDeps['extract']>>> = [];
-  if (profile === 'full') {
-    const extractFn = deps.extract ?? (async (urls: string[]) => (await deps.search.extract(urls)).results);
-    extractResults = await extractFn(selection.candidates.map((c) => c.url));
-  }
-  const context = buildSearchContext(selection.candidates, extractResults, cfg.sources);
   log(
     `contexto: ${context.searchContext.length} chars de ${context.resultsCount} fontes` +
       (profile === 'full' ? ` (${context.extractedResultsCount} extraídas)` : ' (sem extract — modo eco)'),
@@ -343,7 +362,10 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     input.mode === 'generate' && !cfg.extraction.enabled
       ? buildTopicGuidance({ origin: input.topicOrigin ?? 'requested', language, avoidTitles: input.avoidTitles })
       : '';
-  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language) + topicGuidance;
+  const retryDraftInstruction = input.retryContext?.draftText
+    ? `\n\nRASCUNHO DA TENTATIVA ANTERIOR (reaproveite e corrija, sem perder conteúdo útil):\n${input.retryContext.draftText}`
+    : '';
+  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language) + topicGuidance + retryDraftInstruction;
 
   // 10. Chamada LLM de geração
   if (input.mode === 'generate') log(stageMarker('redacao'));
@@ -551,7 +573,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
 
   // 12. Validação determinística fail-safe (camada 3) — contra o mesmo contexto enviado ao LLM.
   //     Também sanitiza links externos alucinados contra as URLs das fontes.
-  const validation = validateOutput(
+  let validation = validateOutput(
     {
       hasChanges: true,
       noDataFound: parsed.noDataFound,
@@ -573,6 +595,94 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
   }
 
   if (!validation.ok) {
+    const repairPrompt = [
+      'O texto JSON abaixo falhou na validação determinística.',
+      'Corrija SOMENTE os problemas listados e devolva exclusivamente um JSON válido com o mesmo schema.',
+      'Preserve o título, dados, fatos, links permitidos e conteúdo útil já existente. Não invente informações.',
+      `Problemas: ${validation.errors.join(' | ')}`,
+      `Rascunho: ${JSON.stringify({
+        hasChanges: parsed.hasChanges,
+        action: parsed.action,
+        noDataFound: parsed.noDataFound,
+        newTitle: parsed.newTitle,
+        updatedHtml: validation.html,
+        changesSummary: parsed.changesSummary,
+        metaDescription: parsed.metaDescription,
+        category: parsed.category,
+        data,
+      })}`,
+    ].join('\n\n');
+
+    try {
+      await deps.checkBudget?.();
+      const repaired = await deps.llmGenerate.complete({
+        prompt: repairPrompt,
+        schema: buildUpdateResponseSchema(cfg.extraction.dataSchema),
+        schemaName: 'content_pilot_repair',
+        maxTokens: cfg.llmDefaults.generateMaxTokens,
+        temperature: 0,
+      });
+      llmCalls.push({
+        purpose: 'repair',
+        provider: repaired.provider,
+        model: repaired.model,
+        inputTokens: repaired.inputTokens,
+        outputTokens: repaired.outputTokens,
+        costUsd: repaired.costUsd,
+        durationMs: repaired.durationMs,
+        status: repaired.truncated ? 'truncated' : 'ok',
+      });
+      const repairedRaw = extractJson(repaired.text) as Partial<EnvelopeParsed> | null;
+      if (repairedRaw && !repaired.truncated) {
+        parsed.newTitle = typeof repairedRaw.newTitle === 'string' && repairedRaw.newTitle ? repairedRaw.newTitle : parsed.newTitle;
+        parsed.updatedHtml = typeof repairedRaw.updatedHtml === 'string' ? repairedRaw.updatedHtml : parsed.updatedHtml;
+        parsed.metaDescription = typeof repairedRaw.metaDescription === 'string' ? repairedRaw.metaDescription.trim() : parsed.metaDescription;
+        parsed.category = resolveCategory(repairedRaw.category, categoriesList);
+        data = repairedRaw.data && typeof repairedRaw.data === 'object' ? (repairedRaw.data as Record<string, unknown>) : data;
+        const repairedValidation = validateOutput(
+          {
+            hasChanges: true,
+            noDataFound: repairedRaw.noDataFound === true,
+            newTitle: parsed.newTitle,
+            updatedHtml: parsed.updatedHtml,
+            data,
+            searchContext: promptContext,
+            resultsCount: context.resultsCount,
+            allowedUrls: context.sources.map((s) => s.url),
+            siteBaseUrl: input.siteBaseUrl,
+            sanitizeLinks: cfg.externalLinks.enabled && input.mode === 'generate',
+          },
+          cfg,
+        );
+        if (repairedValidation.ok) {
+          validation = repairedValidation;
+          parsed.noDataFound = repairedRaw.noDataFound === true;
+          log('validação: reparo automático aprovado');
+        }
+      }
+    } catch (err) {
+      if (err instanceof BudgetExceededError) {
+        return finish({ ...sourcesPatch, status: 'budget_exceeded', skipReason: err.message, prePass: prePassInfo });
+      }
+      if (err instanceof LlmError) {
+        llmCalls.push({
+          purpose: 'repair',
+          provider: deps.llmGenerate.provider,
+          model: deps.llmGenerate.model,
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: null,
+          durationMs: 0,
+          status: 'error',
+        });
+        log(`validação: reparo automático falhou: ${err.message}`);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!validation.ok) {
     return finish({
       ...sourcesPatch,
       status: 'validation_failed',
@@ -588,6 +698,17 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
       metaDescription: parsed.metaDescription || null,
       category: parsed.category,
       externalLinks,
+      draftText: JSON.stringify({
+        hasChanges: parsed.hasChanges,
+        action: parsed.action,
+        noDataFound: parsed.noDataFound,
+        newTitle: parsed.newTitle,
+        updatedHtml: parsed.updatedHtml,
+        changesSummary: parsed.changesSummary,
+        metaDescription: parsed.metaDescription,
+        category: parsed.category,
+        data: validation.data,
+      }),
       prePass: prePassInfo,
     });
   }

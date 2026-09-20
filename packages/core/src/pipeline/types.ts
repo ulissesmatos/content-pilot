@@ -11,7 +11,7 @@ export class BudgetExceededError extends Error {
 }
 
 export interface LlmCallRecord {
-  purpose: 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate' | 'review';
+  purpose: 'generate' | 'repair' | 'verify' | 'discover' | 'dedupe' | 'illustrate' | 'review';
   provider: string;
   model: string;
   inputTokens: number;
@@ -99,4 +99,6 @@ export interface PipelineResult {
   category: string | null;
   /** Diagnóstico dos links externos após a sanitização anti-alucinação. */
   externalLinks: ExternalLinksInfo | null;
+  /** Rascunho não publicado, preservado para reparo/retry sem perder trabalho. */
+  draftText: string | null;
 }

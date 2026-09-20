@@ -35,7 +35,11 @@ export const runItems = pgTable(
     droppedData: jsonb('dropped_data'),
     validationErrors: jsonb('validation_errors'),
     sources: jsonb('sources'),
+    /** Contexto factual reaproveitável em um retry sem nova pesquisa. */
+    searchContext: text('search_context'),
     sourcesHash: text('sources_hash'),
+    /** Resposta não publicada, usada para reparo/retry sem perder o trabalho. */
+    draftText: text('draft_text'),
     previousContentBackup: text('previous_content_backup'),
     durationMs: integer('duration_ms'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

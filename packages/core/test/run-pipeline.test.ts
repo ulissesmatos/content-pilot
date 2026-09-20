@@ -191,12 +191,25 @@ describe('runPipeline (integração com fakes)', () => {
     expect(r.skipReason).toContain('truncada');
   });
 
-  it('validação falha → validation_failed com motivos', async () => {
+  it('validação falha → a IA reaproveita o rascunho e corrige automaticamente', async () => {
     const badHtml = JSON.stringify({
       ...JSON.parse(GEN_RESPONSE),
       updatedHtml: '<p>sem blocos gutenberg e curto</p>',
     });
-    const llm = fakeLlm([{ text: badHtml }, { text: VERIFY_APPROVES_ALL }]);
+    const llm = fakeLlm([{ text: badHtml }, { text: VERIFY_APPROVES_ALL }, { text: GEN_RESPONSE }]);
+    const r = await runPipeline(input(), { llmGenerate: llm, llmVerify: llm, search: fakeSearch('FRUIT20') });
+    expect(r.status).toBe('ready');
+    expect(r.finalHtml).toContain('DG-CODES-WIDGET:START');
+    expect(r.llmCalls.map((call) => call.purpose)).toEqual(['generate', 'verify', 'repair']);
+    expect(llm.calls[2]?.prompt).toContain('blocos Gutenberg');
+  });
+
+  it('reparo automático insuficiente → validation_failed com motivos', async () => {
+    const badHtml = JSON.stringify({
+      ...JSON.parse(GEN_RESPONSE),
+      updatedHtml: '<p>sem blocos gutenberg e curto</p>',
+    });
+    const llm = fakeLlm([{ text: badHtml }, { text: VERIFY_APPROVES_ALL }, { text: badHtml }]);
     const r = await runPipeline(input(), { llmGenerate: llm, llmVerify: llm, search: fakeSearch('FRUIT20') });
     expect(r.status).toBe('validation_failed');
     expect(r.validationErrors.length).toBeGreaterThan(0);

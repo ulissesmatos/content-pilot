@@ -33,7 +33,7 @@ const STATUS_MAP: Record<PipelineResult['status'], string> = {
 
 /** post.process: pipeline completo de 1 post + publicação + trilha de auditoria. */
 export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
-  const { jobId, runId, wpPostId } = payload;
+  const { jobId, runId, wpPostId, retryRunItemId } = payload;
   const startedAt = Date.now();
 
   // Idempotência: retry após sucesso parcial vira no-op
@@ -61,6 +61,9 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
   const [site] = await db.select().from(sites).where(eq(sites.id, job.siteId)).limit(1);
   if (!site || site.workspaceId !== job.workspaceId) throw new Error(`site do job não existe`);
   const workspaceId = job.workspaceId;
+  const retryItem = retryRunItemId
+    ? (await db.select().from(runItems).where(and(eq(runItems.id, retryRunItemId), eq(runItems.workspaceId, workspaceId))).limit(1))[0]
+    : null;
   const logger = createRunLogger(db, runId, `[post ${wpPostId}]`);
   const log = logger.log;
 
@@ -84,7 +87,9 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
         droppedData: result.dropped ?? null,
         validationErrors: result.validationErrors?.length ? result.validationErrors : null,
         sources: result.sources ?? null,
+        searchContext: result.searchContext ?? null,
         sourcesHash: result.sourcesHash ?? null,
+        draftText: result.draftText ?? null,
         previousContentBackup: extras.previousContentBackup ?? null,
         durationMs: Date.now() - startedAt,
       })
@@ -142,6 +147,18 @@ export async function handlePostProcess(db: Db, payload: PostProcessPayload) {
         siteName: site.name,
         post: { id: post.id, title: post.title, slug: post.slug, contentRaw: post.contentRaw },
         lastData: (state?.lastData as Record<string, unknown> | null) ?? null,
+        retryContext: retryItem?.searchContext
+          ? {
+              searchContext: retryItem.searchContext ?? '',
+              sources: (retryItem.sources as PipelineResult['sources']) ?? [],
+              sourcesHash: retryItem.sourcesHash,
+              resultsCount: Array.isArray(retryItem.sources) ? retryItem.sources.length : 0,
+              extractedResultsCount: Array.isArray(retryItem.sources)
+                ? (retryItem.sources as Array<{ extractedContentChars?: number }>).filter((source) => (source.extractedContentChars ?? 0) > 0).length
+                : 0,
+              draftText: retryItem.draftText,
+            }
+          : undefined,
       },
       {
         llmGenerate,

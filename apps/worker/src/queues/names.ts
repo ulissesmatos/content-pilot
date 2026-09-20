@@ -17,6 +17,7 @@ export interface PostProcessPayload {
   jobId: string;
   runId: string;
   wpPostId: number;
+  retryRunItemId?: string;
 }
 
 export interface BriefGeneratePayload {

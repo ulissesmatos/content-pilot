@@ -4,7 +4,8 @@ import { fetchSourceImages, parsePageImage } from '../src/images/source-images';
 import { pickApiSize } from '../src/images/generate';
 import {
   gutenbergImageBlock,
-  injectPlannedImages,
+  injectAfterParagraphs,
+  paragraphEnds,
   planInlineInsertions,
 } from '../src/html/inline-images';
 
@@ -47,23 +48,81 @@ describe('planInlineInsertions', () => {
   });
 });
 
-describe('injectPlannedImages', () => {
+describe('planInlineInsertions: preferência pelas seções que o editor indicou', () => {
+  it('a dica "uma imagem ajuda em Segurança" vira um ponto NAQUELA seção', () => {
+    // sem dica, 2 imagens em 6 parágrafos caem nos parágrafos 1 e 3, e Segurança fica sem nenhuma
+    const plain = planInlineInsertions(HTML, 2);
+    expect(plain.some((p) => p.heading === 'Personagens')).toBe(true);
+
+    const hinted = planInlineInsertions(HTML, 2, { preferHeadings: ['Personagens'] });
+    expect(hinted).toHaveLength(2);
+    // o primeiro parágrafo depois do título é o ponto preferido
+    const personagens = hinted.find((p) => p.heading === 'Personagens');
+    expect(personagens?.paragraphText).toBe('Lucia e Jason são os protagonistas.');
+  });
+
+  it('ignora caixa e acento ao casar o título', () => {
+    const plan = planInlineInsertions(HTML, 1, { preferHeadings: ['PERSONAGENS'] });
+    expect(plan[0]!.heading).toBe('Personagens');
+    const acento = planInlineInsertions(
+      P('a') + H('Segurança') + P('texto de segurança') + P('outro texto'),
+      1,
+      { preferHeadings: ['SEGURANCA'] },
+    );
+    expect(acento[0]!.heading).toBe('Segurança');
+  });
+
+  it('título que não existe no HTML não quebra: cai na distribuição uniforme', () => {
+    const plan = planInlineInsertions(HTML, 2, { preferHeadings: ['Título inexistente'] });
+    expect(plan).toHaveLength(2);
+  });
+
+  it('nunca passa do total pedido, mesmo com mais dicas que imagens', () => {
+    const plan = planInlineInsertions(HTML, 1, { preferHeadings: ['Mapa e cidades', 'Personagens'] });
+    expect(plan).toHaveLength(1);
+  });
+
+  it('a ordem do plano segue a ordem do documento, e os pontos são distintos', () => {
+    const plan = planInlineInsertions(HTML, 3, { preferHeadings: ['Personagens'] });
+    const idx = plan.map((p) => p.paragraphIndex);
+    expect(idx).toEqual([...idx].sort((a, b) => a - b));
+    expect(new Set(idx).size).toBe(idx.length);
+  });
+
+  it('os pontos preferidos entram no total sem duplicar com os uniformes', () => {
+    for (let n = 1; n <= 5; n++) {
+      const plan = planInlineInsertions(HTML, n, { preferHeadings: ['Mapa e cidades', 'Personagens'] });
+      expect(new Set(plan.map((p) => p.paragraphIndex)).size).toBe(plan.length);
+    }
+  });
+});
+
+describe('injectAfterParagraphs', () => {
   const img = (n: number) => ({ url: `https://wp/${n}.webp`, alt: `alt ${n}`, mediaId: 100 + n });
 
-  it('cada imagem cai no ponto do PRÓPRIO slot, mesmo quando outro slot falhou', () => {
+  it('cada imagem cai depois do parágrafo do PRÓPRIO slot, mesmo quando outro slot falhou', () => {
     const plan = planInlineInsertions(HTML, 2);
-    const onlySecond = injectPlannedImages(HTML, 2, [{ slotIndex: 1, image: img(2) }]);
+    const onlySecond = injectAfterParagraphs(HTML, [{ afterParagraph: plan[1]!.paragraphIndex, image: img(2) }]);
     const idx = onlySecond.indexOf('https://wp/2.webp');
     expect(idx).toBe(plan[1]!.pos + gutenbergImageBlock(img(2)).indexOf('https://wp/2.webp'));
   });
 
   it('preserva a estrutura de blocos e não perde texto', () => {
-    const out = injectPlannedImages(HTML, 2, [
-      { slotIndex: 0, image: img(1) },
-      { slotIndex: 1, image: img(2) },
+    const out = injectAfterParagraphs(HTML, [
+      { afterParagraph: 1, image: img(1) },
+      { afterParagraph: 3, image: img(2) },
     ]);
     expect(out.match(/<!-- wp:/g)!.length).toBe(out.match(/<!-- \/wp:/g)!.length);
     for (const t of ['Vice City volta', 'Lucia e Jason', 'Fim da história']) expect(out).toContain(t);
+  });
+
+  it('duas imagens em parágrafos diferentes não se atropelam (inserção de trás para frente)', () => {
+    const out = injectAfterParagraphs(HTML, [
+      { afterParagraph: 1, image: img(1) },
+      { afterParagraph: 4, image: img(2) },
+    ]);
+    expect(out.indexOf('wp/1.webp')).toBeLessThan(out.indexOf('wp/2.webp'));
+    expect(out.match(/<!-- wp:image/g)).toHaveLength(2);
   });
 
   it('a imagem leva o ID da mídia do WP, a identidade que a tela de preview usa para trocá-la', () => {
@@ -78,8 +137,16 @@ describe('injectPlannedImages', () => {
     expect(block).toContain('wp:image {"sizeSlug":"large","linkDestination":"none"}');
   });
 
-  it('slot fora do plano é ignorado em vez de lançar', () => {
-    expect(() => injectPlannedImages(HTML, 2, [{ slotIndex: 9, image: img(1) }])).not.toThrow();
+  it('parágrafo inexistente ou índice inválido é ignorado em vez de lançar', () => {
+    expect(() => injectAfterParagraphs(HTML, [{ afterParagraph: 99, image: img(1) }])).not.toThrow();
+    expect(injectAfterParagraphs(HTML, [{ afterParagraph: 99, image: img(1) }])).toBe(HTML);
+    expect(injectAfterParagraphs(HTML, [{ afterParagraph: -1, image: img(1) }])).toBe(HTML);
+    expect(injectAfterParagraphs(HTML, [{ afterParagraph: 1.5, image: img(1) }])).toBe(HTML);
+  });
+
+  it('paragraphEnds respeita o mesmo filtro do plano (fora de bloco gerenciado)', () => {
+    const managed = P('antes') + '<!-- CP-BLOCK:START --><p>dentro</p><!-- CP-BLOCK:END -->' + P('depois');
+    expect(paragraphEnds(managed)).toHaveLength(2);
   });
 });
 

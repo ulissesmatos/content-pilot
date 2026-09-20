@@ -19,7 +19,10 @@ export const ESTIMATED_TOKENS_PER_POST: Record<LlmPurpose, { input: number; outp
   verify: { input: 12_000, output: 2_000 },
   discover: { input: 4_000, output: 800 },
   dedupe: { input: 1_500, output: 200 },
-  illustrate: { input: 1_500, output: 500 },
+  // visão roda por slot (capa + imagens do corpo), cada chamada com várias miniaturas
+  illustrate: { input: 6_000, output: 1_200 },
+  // o revisor relê o artigo e devolve o HTML inteiro revisado
+  review: { input: 10_000, output: 6_000 },
 };
 
 export interface PostCostBreakdown {

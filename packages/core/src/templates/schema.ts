@@ -151,6 +151,16 @@ export const templateConfigSchema = z.object({
       datePolicy: z.enum(['avoid', 'allow']).optional(),
     })
     .optional(),
+  /**
+   * Revisão editorial (etapa separada da redação). Opcional: quando ausente o
+   * padrão de `isReviewEnabled` vale, o que dá a revisão a templates já gravados
+   * sem migração.
+   */
+  review: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
   validation: z
     .object({
       titleMin: z.number().int().default(10),
@@ -169,6 +179,15 @@ export const templateConfigSchema = z.object({
 });
 
 export type TemplateConfig = z.infer<typeof templateConfigSchema>;
+
+/**
+ * A revisão editorial roda neste template? Padrão: sim para artigo, não para
+ * template com extração de dados (códigos, cupons), onde o texto em volta do
+ * widget é curto e estruturado e uma reescrita só arriscaria o dado.
+ */
+export function isReviewEnabled(cfg: TemplateConfig): boolean {
+  return cfg.review?.enabled ?? !cfg.extraction.enabled;
+}
 
 /** Política de estilo efetiva do template, com os padrões aplicados. */
 export function resolveStylePolicy(cfg: TemplateConfig): { noDashes: boolean; datePolicy: 'avoid' | 'allow' } {

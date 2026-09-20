@@ -11,7 +11,7 @@ export class BudgetExceededError extends Error {
 }
 
 export interface LlmCallRecord {
-  purpose: 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate';
+  purpose: 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate' | 'review';
   provider: string;
   model: string;
   inputTokens: number;
@@ -79,6 +79,12 @@ export interface PipelineResult {
   validationErrors: string[];
   verifyFailed: boolean;
   sources: ContextSource[];
+  /**
+   * O texto das fontes que foi enviado ao modelo. Etapas posteriores (a revisão
+   * editorial) precisam dele como única base factual: sem ele não há como
+   * conferir se um número do texto revisado existe de verdade.
+   */
+  searchContext: string;
   sourcesHash: string | null;
   resultsCount: number;
   extractedResultsCount: number;

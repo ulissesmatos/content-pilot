@@ -36,6 +36,7 @@ const MODEL_PROFILES = [
     isDefault: true,
     entries: {
       generate: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
+      review: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
       verify: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
       discover: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
       dedupe: { provider: 'openai' as const, modelId: 'gpt-4.1-mini' },
@@ -49,6 +50,7 @@ const MODEL_PROFILES = [
     isDefault: false,
     entries: {
       generate: { provider: 'anthropic' as const, modelId: 'claude-sonnet-4-5' },
+      review: { provider: 'anthropic' as const, modelId: 'claude-sonnet-4-5' },
       verify: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
       discover: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
       dedupe: { provider: 'anthropic' as const, modelId: 'claude-haiku-4-5' },
@@ -62,6 +64,7 @@ const MODEL_PROFILES = [
     isDefault: false,
     entries: {
       generate: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
+      review: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
       verify: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
       discover: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
       dedupe: { provider: 'openrouter' as const, modelId: 'openai/gpt-4o-mini' },
@@ -182,7 +185,7 @@ async function main() {
     await db.insert(modelProfileEntries).values(
       Object.entries(seed.entries).map(([purpose, entry]) => ({
           profileId: profile!.id,
-          purpose: purpose as 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate',
+          purpose: purpose as 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate' | 'review',
           provider: entry.provider,
           modelId: entry.modelId,
       })),

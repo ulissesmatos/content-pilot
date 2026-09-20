@@ -36,6 +36,9 @@ import { isSuperAdmin } from '@/lib/super-admin';
  * removido depois da última sincronização).
  */
 
+/** Etapas cuja ausência não impede a execução. */
+const OPTIONAL_PURPOSES: ReadonlySet<string> = new Set(['review']);
+
 export interface ReadinessIssue {
   /** Estável, para testes e para não depender do texto. */
   code:
@@ -149,6 +152,10 @@ export async function getWorkspaceReadiness(
         }
       }
     } catch {
+      // A revisão editorial é polimento opcional (o template decide se roda, e o
+      // worker pula sozinho quando ela não está configurada). Faltar a etapa não
+      // pode barrar a geração de um post que sai bem sem ela.
+      if (OPTIONAL_PURPOSES.has(purpose)) continue;
       issues.push({
         code: 'no-model-profile',
         message: `Nenhum modelo configurado para "${PURPOSE_LABEL[purpose]}".`,

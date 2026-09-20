@@ -182,11 +182,11 @@ describe('illustratePost (sharp real, WordPress falso)', () => {
     });
     expect(out.plannedInline).toBe(1);
     expect(out.inline).toHaveLength(1);
-    expect(out.inline[0]!.slotIndex).toBe(0);
+    expect(out.inline[0]!.afterParagraph).toBeGreaterThanOrEqual(0);
     expect(out.inline[0]!.image.mediaId).toBeGreaterThan(500);
 
-    const { injectPlannedImages } = await import('@content-pilot/core');
-    const html = injectPlannedImages(HTML, out.plannedInline, out.inline);
+    const { injectAfterParagraphs } = await import('@content-pilot/core');
+    const html = injectAfterParagraphs(HTML, out.inline);
     expect(html).toContain(`wp-image-${out.inline[0]!.image.mediaId}`);
     expect(html.match(/<!-- wp:/g)!.length).toBe(html.match(/<!-- \/wp:/g)!.length);
   });

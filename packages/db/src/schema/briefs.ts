@@ -36,6 +36,11 @@ export const briefs = pgTable('briefs', {
    * porque o HTML não diz se uma imagem foi gerada por IA, nem que a capa falta.
    */
   imageReport: jsonb('image_report'),
+  /**
+   * O que a revisão editorial achou e mudou (trechos maçantes, tom de IA, seções
+   * curtas) ou por que ela foi descartada. A tela de preview mostra isto.
+   */
+  editorialReport: jsonb('editorial_report'),
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

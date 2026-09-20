@@ -99,6 +99,13 @@
       "when": 1789921191716,
       "tag": "0014_briefs_image_report",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789922428382,
+      "tag": "0015_briefs_editorial_report",
+      "breakpoints": true
     }
   ]
 }

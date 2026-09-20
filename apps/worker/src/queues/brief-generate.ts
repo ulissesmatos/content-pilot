@@ -3,13 +3,18 @@ import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@c
 import {
   checkTopicAlreadyCovered,
   emptyImageReport,
-  injectPlannedImages,
+  injectAfterParagraphs,
+  isReviewEnabled,
   jobLlmConfigSchema,
   PlanLimitError,
+  resolveStylePolicy,
+  reviewArticle,
   runPipeline,
   slugify,
   suggestedInlineCount,
+  type ImageHint,
   type ImageReport,
+  type ReviewChange,
 } from '@content-pilot/core';
 import {
   preflightLlmTasks,
@@ -220,15 +225,59 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       : undefined;
     const categoryId = chosenCategoryId ?? brief.targetCategoryWpId ?? undefined;
 
+    // Revisão editorial: etapa SEPARADA da redação, com modelo próprio. Relê o
+    // rascunho atrás de trecho maçante, seção curta e tom de IA, e diz onde uma
+    // imagem ajudaria. A saída só entra se passar pelas guardas (link, número,
+    // tamanho, estrutura); do contrário fica o texto original. Falha aqui nunca
+    // derruba o post: é polimento.
+    let reviewNotes: { status: string; changes: ReviewChange[]; reason: string | null; remainingTells: string[] } | null = null;
+    let imageHints: ImageHint[] = [];
+    const finalTitle = result.newTitle ?? brief.topic;
+    let reviewedHtml = result.finalHtml;
+    if (isReviewEnabled(template.config)) {
+      try {
+        const reviewModel = await resolveTaskModel(db, workspaceId, 'review');
+        const llmReview = await resolveLlmProvider(db, workspaceId, reviewModel);
+        const review = await reviewArticle(
+          {
+            topic: brief.topic,
+            title: finalTitle,
+            html: reviewedHtml,
+            language: brief.language,
+            context: result.searchContext,
+            style: resolveStylePolicy(template.config),
+            maxTokens: template.config.llmDefaults.generateMaxTokens,
+          },
+          { llm: llmReview, checkBudget, log },
+        );
+        result.llmCalls.push(...review.llmCalls);
+        reviewedHtml = review.html;
+        imageHints = review.imageHints;
+        reviewNotes = {
+          status: review.status,
+          changes: review.changes,
+          reason: review.reason,
+          remainingTells: review.remainingTells,
+        };
+      } catch (err) {
+        // etapa sem modelo configurado, chave sem acesso, etc.: segue sem revisão
+        log(`revisão editorial indisponível, seguindo sem ela: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // Imagens (Fase 3): capa + imagens do corpo, só quando o template pede.
     // A visão tem modelo PRÓPRIO no perfil (purpose `illustrate`): antes ela
     // reusava o de geração, então trocar aquele para um modelo sem visão
     // fazia todo post sair sem capa, em silêncio.
     let featuredMediaId: number | undefined;
-    let finalHtml = result.finalHtml;
+    let finalHtml = reviewedHtml;
     let imageReport: ImageReport = emptyImageReport();
     if (template.config.images.enabled) {
-      const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
+      // O editor pode pedir mais imagens do que a proporção do texto sugere, até o teto do template.
+      const inlineCount = Math.min(
+        template.config.images.inlineMax,
+        Math.max(suggestedInlineCount(finalHtml, template.config.images.inlineMax), imageHints.length),
+      );
       const illustrateModel = await resolveTaskModel(db, workspaceId, 'illustrate');
       const illustrateIssues = await preflightLlmTasks(db, workspaceId, [
         { ...illustrateModel, label: 'Ilustração' },
@@ -249,6 +298,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
           keywords: brief.keywords ?? [],
           language: brief.language,
           html: finalHtml,
+          hints: imageHints,
           candidates: template.config.images.candidates,
           inlineCount,
           coverSize: template.config.images.cover,
@@ -265,8 +315,8 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
           log,
         });
         featuredMediaId = ill.mediaId ?? undefined;
-        // cada imagem volta ao ponto do PRÓPRIO slot: se uma falhou, as outras não deslizam
-        finalHtml = injectPlannedImages(finalHtml, ill.plannedInline, ill.inline);
+        // cada imagem volta ao parágrafo do PRÓPRIO slot: se uma falhou, as outras não deslizam
+        finalHtml = injectAfterParagraphs(finalHtml, ill.inline);
         result.llmCalls.push(...ill.llmCalls); // registra os tokens da visão no run
         imageReport = ill.report;
       }
@@ -281,7 +331,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     }
 
     const created = await wp.createPost({
-      title: result.newTitle ?? brief.topic,
+      title: finalTitle,
       content: finalHtml,
       status: publishMode,
       categories: categoryId ? [categoryId] : undefined,
@@ -317,6 +367,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         createdWpPostId: created.id,
         createdWpPostUrl: created.link,
         imageReport,
+        editorialReport: reviewNotes,
         error: null,
         updatedAt: new Date(),
       })

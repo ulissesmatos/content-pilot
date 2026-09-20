@@ -3,7 +3,7 @@
  * três lugares precisam concordar: a coluna `llm_calls.purpose`, as entradas
  * de um perfil de modelo e a UI do painel.
  */
-export const LLM_PURPOSES = ['generate', 'verify', 'discover', 'dedupe', 'illustrate'] as const;
+export const LLM_PURPOSES = ['generate', 'verify', 'discover', 'dedupe', 'illustrate', 'review'] as const;
 
 export type LlmPurpose = (typeof LLM_PURPOSES)[number];
 
@@ -16,4 +16,5 @@ export const PURPOSE_LABEL: Record<LlmPurpose, string> = {
   discover: 'Descoberta de pautas',
   dedupe: 'Deduplicação de pautas',
   illustrate: 'Escolha da imagem (visão)',
+  review: 'Revisão editorial',
 };

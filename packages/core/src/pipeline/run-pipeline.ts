@@ -127,6 +127,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     validationErrors: [],
     verifyFailed: false,
     sources: [],
+    searchContext: '',
     sourcesHash: null,
     resultsCount: 0,
     extractedResultsCount: 0,
@@ -217,6 +218,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
 
   const sourcesPatch = {
     sources: context.sources,
+    searchContext: context.searchContext,
     sourcesHash,
     resultsCount: context.resultsCount,
     extractedResultsCount: context.extractedResultsCount,

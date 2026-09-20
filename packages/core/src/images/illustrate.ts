@@ -5,7 +5,7 @@ import type { JsonSchema, LlmProvider } from '../llm/types';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import type { ImageCandidate, ImageSearchClient } from './openverse';
 import { ImageGenerationError, type ImageGenClient, type ImageSize } from './generate';
-import { planImageSlots, type ImageSlot } from './slots';
+import { planImageSlots, type ImageSlot, type SlotHint } from './slots';
 
 /**
  * Ilustração de artigo, por slot.
@@ -47,6 +47,8 @@ export interface IllustrateInput {
   inlineSize: ImageSize;
   /** Quantas candidatas mostrar à visão por slot (default 6). */
   maxCandidates?: number;
+  /** Dicas do revisor editorial sobre o que cada imagem deve mostrar. */
+  hints?: SlotHint[];
   imageMaxTokens?: number;
 }
 
@@ -207,6 +209,7 @@ export async function illustrateArticle(input: IllustrateInput, deps: Illustrate
     inlineCount,
     coverSize: input.coverSize,
     inlineSize: input.inlineSize,
+    hints: input.hints,
   });
   log(`ilustração: ${slots.length} imagem(ns) planejada(s) (1 capa + ${slots.length - 1} no corpo)`);
 

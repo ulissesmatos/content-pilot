@@ -1,3 +1,5 @@
+import { stripDiacritics } from '../i18n/slug';
+
 /**
  * Injeção determinística de imagens no corpo do artigo: recebe o HTML final e
  * as imagens escolhidas pela visão (já hospedadas no WP) e insere blocos
@@ -82,45 +84,93 @@ export interface InsertionPoint {
 const stripTags = (h: string) =>
   h.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-/**
- * ONDE as imagens entram, e o que existe em volta de cada ponto. Fonte única
- * de verdade: o planejamento de imagens (que descreve o que cada slot deve
- * mostrar) e a injeção usam este mesmo plano, então a descrição nunca aponta
- * para um parágrafo diferente do que recebe a imagem.
- */
-export function planInlineInsertions(html: string, count: number): InsertionPoint[] {
-  if (!html || count <= 0) return [];
+export interface PlanOptions {
+  /**
+   * Títulos de seção onde o editor disse que uma imagem ajudaria. Esses pontos
+   * têm prioridade; o que sobrar do total é distribuído uniformemente. Sem isto,
+   * a dica "uma imagem ajuda em Segurança" se perdia sempre que a aritmética
+   * não caía naquela seção.
+   */
+  preferHeadings?: string[];
+}
 
+const normTitle = (t: string) => stripDiacritics(t.toLowerCase()).replace(/\s+/g, ' ').trim();
+
+/** Onde começa o parágrafo que termina em `end`: o último `<p` depois de `floor`. */
+function paragraphStart(html: string, floor: number, end: number): number {
+  let i = html.lastIndexOf('<p', end - 1);
+  while (i > floor && !/[\s>]/.test(html[i + 2] ?? '')) i = html.lastIndexOf('<p', i - 1); // pula <pre>, <path>...
+  return i > floor ? i : floor;
+}
+
+/** Offsets logo depois de cada parágrafo, fora dos blocos gerenciados. */
+export function paragraphEnds(html: string): number[] {
+  if (!html) return [];
   const managed: Array<[number, number]> = [];
   for (const m of html.matchAll(MANAGED_RANGE)) managed.push([m.index!, m.index! + m[0]!.length]);
-
   let points = matchEnds(html, PARAGRAPH_END);
   if (points.length === 0) points = matchEnds(html, PLAIN_P_END);
-  points = points.filter((p) => !managed.some(([s, e]) => p > s && p < e));
+  return points.filter((p) => !managed.some(([s, e]) => p > s && p < e));
+}
+
+/**
+ * ONDE as imagens entram, e o que existe em volta de cada ponto. O planejamento
+ * de imagens descreve cada slot a partir deste plano, e o slot guarda o
+ * `paragraphIndex`: é ele que a injeção usa, sem recalcular nada.
+ */
+export function planInlineInsertions(html: string, count: number, opts: PlanOptions = {}): InsertionPoint[] {
+  if (!html || count <= 0) return [];
+
+  const points = paragraphEnds(html);
   if (points.length === 0) return [];
 
   const n = points.length;
   const k = Math.min(count, n);
-  const used = new Set<number>();
-  const plan: InsertionPoint[] = [];
   const headings = [...html.matchAll(/<h[2-4][^>]*>([\s\S]*?)<\/h[2-4]>/gi)].map((m) => ({
     pos: m.index!,
     text: stripTags(m[1]!),
   }));
 
-  for (let i = 0; i < k; i++) {
-    let target = Math.round(((i + 1) * n) / (k + 1)) - 1;
-    target = Math.max(0, Math.min(n - 1, target));
-    while (target < n && used.has(target)) target++;
-    if (target >= n) break;
-    used.add(target);
+  const chosen = new Set<number>();
 
-    const pos = points[target]!;
-    const before = target > 0 ? points[target - 1]! : 0;
-    const heading = [...headings].reverse().find((h) => h.pos < pos)?.text ?? null;
-    plan.push({ pos, paragraphIndex: target, paragraphText: stripTags(html.slice(before, pos)), heading: heading || null });
+  // 1. Seções indicadas pelo editor: o primeiro parágrafo depois do título.
+  for (const wanted of (opts.preferHeadings ?? []).map(normTitle).filter(Boolean)) {
+    if (chosen.size >= k) break;
+    const heading = headings.find((h) => normTitle(h.text) === wanted);
+    if (!heading) continue;
+    const target = points.findIndex((p) => p > heading.pos);
+    if (target >= 0) chosen.add(target);
   }
-  return plan;
+
+  // 2. O que sobrou do total: distribuição uniforme, pulando o que já foi escolhido.
+  const remaining = k - chosen.size;
+  for (let i = 0; i < remaining; i++) {
+    let target = Math.round(((i + 1) * n) / (remaining + 1)) - 1;
+    target = Math.max(0, Math.min(n - 1, target));
+    while (target < n && chosen.has(target)) target++;
+    if (target >= n) {
+      target = Math.max(0, Math.min(n - 1, Math.round(((i + 1) * n) / (remaining + 1)) - 1));
+      while (target >= 0 && chosen.has(target)) target--;
+      if (target < 0) break;
+    }
+    chosen.add(target);
+  }
+
+  return [...chosen]
+    .sort((a, b) => a - b)
+    .map((target) => {
+      const pos = points[target]!;
+      const before = target > 0 ? points[target - 1]! : 0;
+      const heading = [...headings].reverse().find((h) => h.pos < pos)?.text ?? null;
+      return {
+        pos,
+        paragraphIndex: target,
+        // SÓ este parágrafo. Cortar desde o fim do anterior levava junto o título
+        // da seção, que fica no meio, e a descrição do slot saía "Título Título texto".
+        paragraphText: stripTags(html.slice(paragraphStart(html, before, pos), pos)),
+        heading: heading || null,
+      };
+    });
 }
 
 /**
@@ -131,37 +181,31 @@ export function planInlineInsertions(html: string, count: number): InsertionPoin
  */
 export function injectInlineImages(html: string, images: InlineImage[]): string {
   if (!html || images.length === 0) return html;
-
   const plan = planInlineInsertions(html, images.length);
-  if (plan.length === 0) return html;
-
-  const insertions = plan.map((point, i) => ({ pos: point.pos, block: gutenbergImageBlock(images[i]!) }));
-
-  // insere de trás para frente para não deslocar os offsets anteriores
-  insertions.sort((a, b) => b.pos - a.pos);
-  let out = html;
-  for (const ins of insertions) out = out.slice(0, ins.pos) + ins.block + out.slice(ins.pos);
-  return out;
+  return injectAfterParagraphs(
+    html,
+    plan.map((point, idx) => ({ afterParagraph: point.paragraphIndex, image: images[idx]! })),
+  );
 }
 
 /**
- * Insere cada imagem no ponto que foi PLANEJADO para o slot dela.
+ * Insere cada imagem depois do parágrafo indicado.
  *
- * `injectInlineImages` redistribui as imagens que sobraram uniformemente; isso
- * serve quando todas chegam, mas quando uma falha as demais deslizam para
- * posições que não combinam com a descrição com que foram escolhidas. Aqui o
- * slot 2 continua caindo depois do parágrafo do slot 2, falhe o slot 1 ou não.
+ * O slot guarda o índice do parágrafo onde a imagem foi planejada, então a
+ * imagem do slot 2 continua caindo depois do parágrafo do slot 2 mesmo quando o
+ * slot 1 falhou. Redistribuir uniformemente (como `injectInlineImages`) faria as
+ * demais deslizarem para posições que não combinam com a descrição com que
+ * foram escolhidas.
  */
-export function injectPlannedImages(
+export function injectAfterParagraphs(
   html: string,
-  plannedCount: number,
-  entries: Array<{ slotIndex: number; image: InlineImage }>,
+  entries: Array<{ afterParagraph: number; image: InlineImage }>,
 ): string {
   if (!html || entries.length === 0) return html;
-  const plan = planInlineInsertions(html, plannedCount);
+  const ends = paragraphEnds(html);
   const insertions = entries
-    .filter((e) => plan[e.slotIndex])
-    .map((e) => ({ pos: plan[e.slotIndex]!.pos, block: gutenbergImageBlock(e.image) }))
+    .filter((e) => Number.isInteger(e.afterParagraph) && ends[e.afterParagraph] !== undefined)
+    .map((e) => ({ pos: ends[e.afterParagraph]!, block: gutenbergImageBlock(e.image) }))
     .sort((a, b) => b.pos - a.pos);
   let out = html;
   for (const ins of insertions) out = out.slice(0, ins.pos) + ins.block + out.slice(ins.pos);

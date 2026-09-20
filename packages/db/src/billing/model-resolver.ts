@@ -13,7 +13,7 @@ import { cachedConfig } from '../config-cache';
  * centenas de dólares de IA.
  */
 
-export type LlmPurpose = 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate';
+export type LlmPurpose = 'generate' | 'verify' | 'discover' | 'dedupe' | 'illustrate' | 'review';
 export type LlmProviderName = 'anthropic' | 'openai' | 'openrouter';
 
 export interface ResolvedModel {

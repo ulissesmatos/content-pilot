@@ -15,7 +15,7 @@ export const llmCalls = pgTable(
       .notNull()
       .references(() => runs.id, { onDelete: 'cascade' }),
     runItemId: uuid('run_item_id').references(() => runItems.id, { onDelete: 'set null' }),
-    purpose: text('purpose', { enum: ['generate', 'verify', 'discover', 'dedupe', 'illustrate'] }).notNull(),
+    purpose: text('purpose', { enum: ['generate', 'verify', 'discover', 'dedupe', 'illustrate', 'review'] }).notNull(),
     provider: text('provider').notNull(),
     model: text('model').notNull(),
     inputTokens: integer('input_tokens').notNull().default(0),

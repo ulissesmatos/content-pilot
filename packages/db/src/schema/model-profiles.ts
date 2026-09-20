@@ -30,7 +30,7 @@ export const modelProfileEntries = pgTable(
       .references(() => modelProfiles.id, { onDelete: 'cascade' }),
     /** Mesma lista de llm_calls.purpose — a constante vive em core/llm/purposes.ts. */
     purpose: text('purpose', {
-      enum: ['generate', 'verify', 'discover', 'dedupe', 'illustrate'],
+      enum: ['generate', 'verify', 'discover', 'dedupe', 'illustrate', 'review'],
     }).notNull(),
     provider: text('provider', { enum: ['anthropic', 'openai', 'openrouter'] }).notNull(),
     modelId: text('model_id').notNull(),

@@ -1,6 +1,6 @@
 {
-  "id": "1171a015-bd02-4cfb-a977-d51d40c8db8a",
-  "prevId": "a67223cb-6191-4c8e-b926-f6a0b9b449ec",
+  "id": "ae77c0bb-2187-428b-b2b1-e079436fedf2",
+  "prevId": "1171a015-bd02-4cfb-a977-d51d40c8db8a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -854,6 +854,12 @@
         },
         "image_report": {
           "name": "image_report",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "editorial_report": {
+          "name": "editorial_report",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

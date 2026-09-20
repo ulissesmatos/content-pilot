@@ -2,6 +2,12 @@ import { planInlineInsertions } from '../html/inline-images';
 import { stripDiacritics } from '../i18n/slug';
 import type { ImageSize } from './generate';
 
+/** Dica do revisor sobre onde uma imagem ajuda. Tipo próprio para o módulo de imagens não depender do de revisão. */
+export interface SlotHint {
+  afterHeading: string | null;
+  description: string;
+}
+
 /**
  * Planejamento de imagens de um artigo.
  *
@@ -20,11 +26,6 @@ export interface ImageSlot {
   role: 'cover' | 'inline';
   /** Índice do parágrafo depois do qual a imagem entra (só `inline`). */
   afterParagraph?: number;
-  /**
-   * Posição do slot entre as imagens do corpo (base 0). É o `slotIndex` que
-   * `injectPlannedImages` usa para pôr a imagem no ponto do PRÓPRIO slot.
-   */
-  inlineIndex?: number;
   /** O que a imagem deve mostrar. Alimenta a visão e o prompt de geração. */
   description: string;
   /** Título da seção onde a imagem cai. */
@@ -43,6 +44,8 @@ export interface PlanSlotsInput {
   inlineCount: number;
   coverSize: ImageSize;
   inlineSize: ImageSize;
+  /** Dicas do revisor editorial: dizem o que a imagem de cada seção deve mostrar. */
+  hints?: SlotHint[];
 }
 
 const STOPWORDS = new Set(
@@ -71,13 +74,30 @@ export function keyTerms(text: string, max = 6): string[] {
   return out;
 }
 
-/** Consulta de busca: assunto do artigo + o que a seção trata, sem ruído. */
-export function buildSlotQuery(topic: string, keywords: string[], heading: string | null, paragraph: string): string {
+/**
+ * Consulta de busca: assunto do artigo + o que a seção trata, sem ruído.
+ * `hint` é o que o editor disse que a imagem deve mostrar; quando existe, vale
+ * mais que a inferência a partir do título e do parágrafo.
+ */
+export function buildSlotQuery(
+  topic: string,
+  keywords: string[],
+  heading: string | null,
+  paragraph: string,
+  hint?: string,
+): string {
   // O assunto ancora a busca (evita imagem de outro jogo/produto); a seção
   // afina. Duas palavras-chave sozinhas era o que deixava a busca genérica.
   const anchor = keywords.length > 0 ? keywords.slice(0, 2).join(' ') : keyTerms(topic, 4).join(' ');
-  const detail = keyTerms(heading ?? paragraph, 4).join(' ');
+  const detail = keyTerms(hint ? `${hint} ${heading ?? ''}` : (heading ?? paragraph), 4).join(' ');
   return [anchor, detail].filter(Boolean).join(' ').slice(0, 140).trim();
+}
+
+/** A dica cujo título casa com o da seção (ignorando caixa e acento). */
+function hintFor(heading: string | null, hints: SlotHint[] | undefined): SlotHint | undefined {
+  if (!heading || !hints?.length) return undefined;
+  const h = norm(heading).trim();
+  return hints.find((x) => x.afterHeading && norm(x.afterHeading).trim() === h);
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n).trimEnd()}…` : s);
@@ -96,17 +116,21 @@ export function planImageSlots(input: PlanSlotsInput): ImageSlot[] {
     allowText: false,
   });
 
-  const points = planInlineInsertions(input.html, input.inlineCount);
+  const preferHeadings = (input.hints ?? []).map((h) => h.afterHeading).filter((h): h is string => Boolean(h));
+  const points = planInlineInsertions(input.html, input.inlineCount, { preferHeadings });
   points.forEach((point, i) => {
     const about = point.heading ? `${point.heading}: ${clip(point.paragraphText, 220)}` : clip(point.paragraphText, 260);
+    const hint = hintFor(point.heading, input.hints);
     slots.push({
       id: `inline-${i + 1}`,
       role: 'inline',
       afterParagraph: point.paragraphIndex,
-      inlineIndex: i,
-      description: `Imagem do corpo do artigo "${topic}", logo após este trecho: ${about}`,
+      description:
+        `Imagem do corpo do artigo "${topic}", logo após este trecho: ${about}` +
+        // o editor disse o que a imagem desta seção deve mostrar: vale mais que a inferência
+        (hint ? ` A imagem deve mostrar: ${hint.description}` : ''),
       heading: point.heading,
-      query: buildSlotQuery(topic, keywords, point.heading, point.paragraphText),
+      query: buildSlotQuery(topic, keywords, point.heading, point.paragraphText, hint?.description),
       size: input.inlineSize,
       allowText: false,
     });

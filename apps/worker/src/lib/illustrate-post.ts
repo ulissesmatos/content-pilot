@@ -17,22 +17,23 @@ import {
   type LlmCallRecord,
   type LlmProvider,
   type SearchClient,
+  type SlotHint,
 } from '@content-pilot/core';
 import { imageFilename, prepareCandidate, processForUpload } from './image-processing';
 
-/** Imagem do corpo já no WordPress, com o slot a que pertence. */
+/** Imagem do corpo já no WordPress, com o parágrafo depois do qual entra. */
 export interface UploadedInline {
-  /** Posição do slot entre as imagens do corpo: onde `injectPlannedImages` a põe. */
-  slotIndex: number;
+  /** Parágrafo planejado para o slot: `injectAfterParagraphs` a põe ali, falhe outro slot ou não. */
+  afterParagraph: number;
   image: InlineImage;
 }
 
 export interface IllustratePostResult {
   /** ID da imagem destacada. Null quando nada produziu capa. */
   mediaId: number | null;
-  /** Imagens do corpo, cada uma com o índice do próprio slot. */
+  /** Imagens do corpo, cada uma com o parágrafo do próprio slot. */
   inline: UploadedInline[];
-  /** Quantos slots do corpo foram planejados (para posicionar sem deslizar). */
+  /** Quantos slots do corpo foram planejados. */
   plannedInline: number;
   /** Nenhuma capa: o post NÃO deve ser publicado. */
   coverMissing: boolean;
@@ -59,6 +60,8 @@ export async function illustratePost(opts: {
   language: string;
   /** HTML final do artigo: dele saem as posições e o contexto de cada imagem. */
   html: string;
+  /** Dicas do revisor editorial sobre onde uma imagem ajuda e o que ela deve mostrar. */
+  hints?: SlotHint[];
   candidates: number;
   inlineCount: number;
   coverSize: ImageSize;
@@ -88,6 +91,7 @@ export async function illustratePost(opts: {
       keywords: opts.keywords,
       language: opts.language,
       html: opts.html,
+      hints: opts.hints,
       inlineCount: opts.inlineCount,
       coverSize: opts.coverSize,
       inlineSize: opts.inlineSize,
@@ -146,9 +150,9 @@ export async function illustratePost(opts: {
   const inline: UploadedInline[] = [];
   for (const img of inlineQueue) {
     const media = await upload(img, 'inline');
-    if (media && img.slot.inlineIndex !== undefined) {
+    if (media && img.slot.afterParagraph !== undefined) {
       inline.push({
-        slotIndex: img.slot.inlineIndex,
+        afterParagraph: img.slot.afterParagraph,
         image: { url: media.sourceUrl, alt: img.alt, caption: img.caption || undefined, mediaId: media.id },
       });
     }

@@ -46,6 +46,7 @@ export * from './autopilot/discover';
 export * from './autopilot/topic-guard';
 export * from './pipeline/types';
 export * from './pipeline/validate-output';
+export * from './pipeline/review';
 export * from './pipeline/pre-pass';
 export * from './pipeline/run-pipeline';
 export { publicFetch, publicHttpsUrl, isPublicAddress } from './http/public-fetch';

@@ -123,7 +123,12 @@ Siga TODAS as regras de códigos, HTML Gutenberg e SEO abaixo:
 - Códigos SOMENTE nos campos data.activeCodes/data.expiredCodes, copiados verbatim das fontes com "source" preenchido; NUNCA no HTML.
 - Preencha "reward" com uma descrição curta (3-6 palavras) do que cada código dá, conforme a fonte (ex.: "500 Gemas", "Pet exclusivo"). Use null só se a fonte não disser a recompensa.
 - Sem <script>/<style>, sem placeholders, sem o título dentro do HTML.
-- Blocos Gutenberg: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
+- Blocos Gutenberg: TODO bloco tem abertura E fechamento, sempre em pares. Exemplos:
+  - Parágrafos: <!-- wp:paragraph --><p>texto</p><!-- /wp:paragraph -->
+  - Listas numeradas: <!-- wp:list {"ordered":true} --><ol><li>item</li></ol><!-- /wp:list -->
+  - Listas com marcador: <!-- wp:list --><ul><li>item</li></ul><!-- /wp:list -->
+  - Headings: <!-- wp:heading {"level":3} --><h3 class="wp-block-heading">título</h3><!-- /wp:heading -->
+  NUNCA escreva <!-- wp:paragraph --> sem o <!-- /wp:paragraph --> correspondente mais adiante — o post é rejeitado se as contagens de abertura e fechamento não baterem.
 - Se não houver códigos válidos nas fontes, noDataFound: true e listas vazias.
 - newTitle: título SEO com mês e ano atuais, ex: "Códigos {{topic}} ({{monthYear}}): lista completa".
 - hasChanges: sempre true.
@@ -236,7 +241,12 @@ Follow ALL the code, Gutenberg HTML and SEO rules:
 - Codes ONLY in data.activeCodes/data.expiredCodes, copied verbatim from sources with "source" filled; NEVER in the HTML.
 - Fill "reward" with a short description (3-6 words) of what each code grants, per the source (e.g. "500 Gems", "Exclusive Pet"). Use null only if the source doesn't state the reward.
 - No <script>/<style>, no placeholders, no title inside the HTML.
-- Gutenberg blocks: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
+- Gutenberg blocks: EVERY block has an opening AND a closing comment, always in pairs. Examples:
+  - Paragraphs: <!-- wp:paragraph --><p>text</p><!-- /wp:paragraph -->
+  - Numbered lists: <!-- wp:list {"ordered":true} --><ol><li>item</li></ol><!-- /wp:list -->
+  - Bullet lists: <!-- wp:list --><ul><li>item</li></ul><!-- /wp:list -->
+  - Headings: <!-- wp:heading {"level":3} --><h3 class="wp-block-heading">title</h3><!-- /wp:heading -->
+  NEVER write <!-- wp:paragraph --> without its matching <!-- /wp:paragraph --> later on — the post is rejected if the opening and closing counts don't match.
 - If there are no valid codes in the sources, noDataFound: true and empty lists.
 - newTitle: SEO title with current month and year, e.g. "{{topic}} Codes ({{monthYear}}): full list".
 - hasChanges: always true. changesSummary: 1-line summary.

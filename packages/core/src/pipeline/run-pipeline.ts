@@ -16,7 +16,7 @@ import {
   resolveStylePolicy,
   type TemplateConfig,
 } from '../templates/schema';
-import { applyStyleGuard, buildStyleInstructions } from '../text/style-guard';
+import { applyStyleGuard, buildLanguageInstruction, buildStyleInstructions } from '../text/style-guard';
 import { buildTopicGuidance } from '../text/topic-guidance';
 import { stageMarker } from './stages';
 import { validateOutput } from './validate-output';
@@ -365,7 +365,12 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
   const retryDraftInstruction = input.retryContext?.draftText
     ? `\n\nRASCUNHO DA TENTATIVA ANTERIOR (reaproveite e corrija, sem perder conteúdo útil):\n${input.retryContext.draftText}`
     : '';
-  const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language) + topicGuidance + retryDraftInstruction;
+  const prompt =
+    interpolate(promptTemplate, promptVars) +
+    buildLanguageInstruction(language) +
+    buildStyleInstructions(stylePolicy, language) +
+    topicGuidance +
+    retryDraftInstruction;
 
   // 10. Chamada LLM de geração
   if (input.mode === 'generate') log(stageMarker('redacao'));

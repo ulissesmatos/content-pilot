@@ -54,7 +54,12 @@ REGRAS:
 - Ignore menus, breadcrumbs, CTAs, categorias e outros textos de navegação das fontes. Nunca publique fragmentos soltos como "Entrar em...", nomes de seção sem explicação ou rótulos de site.
 - Só use checklist quando o assunto realmente pedir instruções práticas; não transforme uma notícia em checklist apenas para preencher a estrutura.
 - Antes de responder, revise coerência: cada parágrafo deve explicar uma ideia completa e o texto não pode conter frases duplicadas, espaços duplos ou afirmações sem fonte.
-- Blocos Gutenberg obrigatórios: <!-- wp:paragraph -->, <!-- wp:list -->, <!-- wp:heading {"level":3} -->.
+- Blocos Gutenberg: TODO bloco tem abertura E fechamento, sempre em pares. Exemplos:
+  - Parágrafos: <!-- wp:paragraph --><p>texto</p><!-- /wp:paragraph -->
+  - Listas numeradas: <!-- wp:list {"ordered":true} --><ol><li>item</li></ol><!-- /wp:list -->
+  - Listas com marcador: <!-- wp:list --><ul><li>item</li></ul><!-- /wp:list -->
+  - Headings: <!-- wp:heading {"level":3} --><h3 class="wp-block-heading">título</h3><!-- /wp:heading -->
+  NUNCA escreva <!-- wp:paragraph --> sem o <!-- /wp:paragraph --> correspondente mais adiante — o post é rejeitado se as contagens de abertura e fechamento não baterem.
 - NÃO coloque o título dentro do updatedHtml; sem <script>/<style>; sem placeholders.
 
 LINKS EXTERNOS (obrigatório):

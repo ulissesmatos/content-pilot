@@ -18,6 +18,37 @@ como pacote npm.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-20
+
+### Added
+- Recuperação automática de respostas inválidas da IA usando o rascunho já
+  gerado e os erros determinísticos de validação.
+- Retry manual por etapa, com reaproveitamento das fontes pesquisadas e do
+  rascunho sem repetir pesquisa e extract quando o contexto está disponível.
+- Acompanhamento ao vivo de execuções, prévia do artigo e troca de imagens por
+  IA no painel.
+- Etapa editorial separada, embeds verificados de YouTube/Twitter e geração de
+  imagens por slot com capa garantida.
+
+### Changed
+- O revisor pode ajustar título e tema sugerido, com guardas para preservar
+  fatos, links e qualidade do artigo.
+- Perfis OpenAI/Anthropic/OpenRouter e configurações BYOK foram separados com
+  seleção explícita de provedor/modelo.
+- O cliente OpenAI passou a suportar modelos GPT-5 usando
+  `max_completion_tokens` e diagnóstico detalhado de erros HTTP.
+- O pipeline aplica guardas de estilo para remover travessão e datas
+  decorativas do conteúdo gerado.
+
+### Fixed
+- Falhas de validação deixam de descartar automaticamente o trabalho já feito;
+  quando o reparo não resolve, a execução continua bloqueada sem publicar
+  conteúdo inválido.
+- IDs de modelo no formato OpenRouter usados em provedores nativos são
+  normalizados ou recusados antes da execução.
+- Readiness, catálogo de modelos, health do worker e execução serial dos testes
+  foram corrigidos no CI.
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

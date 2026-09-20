@@ -75,7 +75,9 @@ jobs:
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
           if [ -z "$COOLIFY_WEBHOOK_URL" ] || [ -z "$COOLIFY_TOKEN" ]; then
-            echo "::error::Defina os secrets COOLIFY_WEBHOOK_URL e COOLIFY_TOKEN para o deploy automático funcionar."
+            echo "::error::COOLIFY_WEBHOOK_URL e/ou COOLIFY_TOKEN chegaram vazios."
+            echo "::error::Eles precisam ser REPOSITORY secrets (Settings > Secrets and variables > Actions > New repository secret)."
+            echo "::error::Secret criado dentro de um Environment nao e visto por este job, porque ele nao declara 'environment:'. Se foi esse o caso, recrie em Repository secrets."
             exit 1
           fi
           curl --fail --silent --show-error --request GET "$COOLIFY_WEBHOOK_URL" \

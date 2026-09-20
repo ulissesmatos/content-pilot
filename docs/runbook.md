@@ -204,6 +204,15 @@ desabilita os botões de execução. **O bloqueio de verdade é no servidor**:
 `runAutopilotNowAction` e `generateTopicNowAction`, então chamar a action
 direto também é recusado.
 
+**O que a prontidão NÃO consegue saber.** `model_catalog` é o catálogo da
+INSTALAÇÃO: ele só recebe modelos nativos dos provedores para os quais existe
+chave da **plataforma** (ver `catalog-sync`). Ele não enxerga o que a chave BYOK
+de um cliente tem. Por isso a conferência de modelo só vale para provedores que
+o catálogo cobre — fora disso a resposta é "não sei", e "não sei" nunca
+bloqueia. Quem confere o modelo de um BYOK é o salvamento em `/credentials`,
+que pergunta à própria chave do usuário, e o preflight do worker antes de
+gastar.
+
 O `preflightLlmTasks` do worker continua existindo e é complementar: ele fala
 com o provedor de verdade e pega o que só a API sabe — chave revogada, modelo
 removido depois da última sincronização do catálogo.
@@ -248,6 +257,23 @@ prefixo. Quem usa OpenRouter de verdade não é tocado.
 Isso conserta as etapas cujo modelo é da OpenAI/Anthropic. Etapas apontando para
 modelos sem equivalente nativo (DeepSeek, Z-AI) continuam exigindo chave
 OpenRouter — troque o modelo em `/admin/ai/profiles` ou cadastre a chave.
+
+## Cache de configuração
+
+Perfis de modelo, planos e settings são lidos por `cachedConfig`: TTL de 30s
+mais um carimbo de versão em `platform_settings.__version`. Quando o carimbo
+não muda, o valor em memória é revalidado **sem recarregar** — o que significa
+que uma mutação que esquece de carimbar nunca chega ao worker, nem depois do
+TTL. Só reiniciando o processo.
+
+Foi o que aconteceu com `setProfileEntryAction`: trocar o modelo em
+`/admin/ai/profiles` não tinha efeito no worker. Por isso o carimbo saiu das
+actions individuais e passou para `runAdminAction`, na mesma transação da
+auditoria: toda mutação administrativa passa por lá, então a garantia é
+estrutural em vez de lembrete.
+
+Gravações fora desse caminho (scripts, SQL manual) continuam precisando de
+`bumpConfigVersion` — ou de reiniciar web e worker.
 
 ## Migrações desta versão
 

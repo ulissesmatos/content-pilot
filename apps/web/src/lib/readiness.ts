@@ -16,6 +16,14 @@ import { isSuperAdmin } from '@/lib/super-admin';
  * O que impede este workspace de rodar o pipeline, decidido ANTES de o usuário
  * apertar qualquer botão.
  *
+ * LIMITE IMPORTANTE: `model_catalog` é o catálogo da INSTALAÇÃO — ele só tem
+ * modelos nativos dos provedores para os quais existe chave da plataforma (ver
+ * catalog-sync). Ele não sabe o que a chave BYOK de um cliente enxerga. Por
+ * isso a conferência de modelo só vale para provedores que o catálogo cobre;
+ * fora disso a resposta é "não sei", e "não sei" nunca bloqueia. Quem confere
+ * o modelo de um BYOK é o salvamento em /credentials, que pergunta à própria
+ * chave do usuário, e o preflight do worker antes de gastar.
+ *
  * Existe porque o worker só descobria isso durante a execução: o run nascia,
  * aparecia como "Executando" e morria com "HTTP 400" ou "nenhuma credencial" —
  * já com crédito de busca gasto e sem dizer o que consertar. Aqui a mesma
@@ -118,6 +126,21 @@ export async function getWorkspaceReadiness(
   }
 
   const inUse = [...resolved.values()];
+  const providersInUse = [...new Set(inUse.map((r) => r.provider))];
+
+  // Quais provedores o catálogo realmente cobre. Sem isto, um workspace BYOK
+  // em OpenAI (sem chave OpenAI da plataforma) receberia "modelo não existe"
+  // em todas as etapas — o catálogo simplesmente não tem linha alguma desse
+  // provedor para comparar.
+  const covered = new Set(
+    (
+      await db
+        .selectDistinct({ provider: modelCatalog.provider })
+        .from(modelCatalog)
+        .where(and(eq(modelCatalog.available, true), inArray(modelCatalog.provider, providersInUse)))
+    ).map((r) => r.provider),
+  );
+
   const catalogRows = inUse.length > 0 && catalogKnown
     ? await db
         .select({
@@ -151,7 +174,10 @@ export async function getWorkspaceReadiness(
       continue;
     }
 
-    if (!catalogKnown) continue;
+    // Provedor fora do catálogo = não dá para conferir. Silêncio é melhor que
+    // um alarme falso por etapa: quem valida esse caso é o save em
+    // /credentials e o preflight do worker.
+    if (!catalogKnown || !covered.has(provider)) continue;
     const entry = byKey.get(`${provider}:${model}`);
     if (!entry) {
       issues.push({

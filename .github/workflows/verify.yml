@@ -31,6 +31,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:integration
+      - run: pnpm --filter web test:integration
       - run: pnpm --filter web lint
       - run: pnpm build
       - run: pnpm audit --prod

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:integration": "node --conditions=react-server --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@content-pilot/core": "workspace:*",
@@ -43,6 +44,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "4.23.0",
     "typescript": "^5"
   }
 }

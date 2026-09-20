@@ -117,6 +117,27 @@ export async function saveAiSettingsAction(input: unknown): Promise<ActionResult
         );
       }
       model = check.modelId;
+
+      // Confere contra a PRÓPRIA chave do usuário. É o único lugar onde essa
+      // pergunta tem resposta autoritativa: o model_catalog é da instalação e
+      // não enxerga a conta dele. Instabilidade da API não impede de salvar —
+      // recusar um modelo válido por causa de um timeout seria pior.
+      try {
+        const models =
+          data.provider === 'openai'
+            ? await fetchOpenAiModels(apiKeyOf(cred, workspaceId))
+            : data.provider === 'anthropic'
+              ? await fetchAnthropicModels(apiKeyOf(cred, workspaceId))
+              : await fetchOpenRouterModels();
+        if (models.length > 0 && !models.some((m) => m.modelId === model)) {
+          throw new UserFacingError(
+            `"${model}" não aparece entre os modelos da sua conta ${data.provider === 'openai' ? 'OpenAI' : data.provider === 'anthropic' ? 'Anthropic' : 'OpenRouter'}. Escolha um da lista.`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof UserFacingError) throw err;
+        console.warn('[ai-settings] não foi possível conferir o modelo na conta do usuário', err);
+      }
     }
     const db = getTenantDb(workspaceId);
     const current = await getWorkspaceAiSettings(db, workspaceId);

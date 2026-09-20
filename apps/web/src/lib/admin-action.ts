@@ -1,7 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { auditLogs, getDb, type Tx } from '@content-pilot/db';
+import { auditLogs, bumpConfigVersion, getDb, type Tx } from '@content-pilot/db';
 import { redactSecrets } from '@content-pilot/core';
 import { requireAdmin, type SessionInfo } from '@/lib/auth';
 import { requestContext } from '@/lib/request-context';
@@ -126,6 +126,16 @@ export async function runAdminAction<S extends z.ZodType, T>(
           patch = { ...patch, ...next };
         },
       });
+
+      // Invalida o cache de config na MESMA transação da mutação.
+      //
+      // Fica aqui, e não em cada action, porque a convenção falhou na prática:
+      // setProfileEntryAction nunca bumpava, e como `cachedConfig` renova a
+      // validade quando a versão não muda, o worker seguia usando o modelo
+      // antigo INDEFINIDAMENTE — trocar o modelo no painel não tinha efeito
+      // até o processo reiniciar. Toda mutação admin passa por aqui, então
+      // agora é estrutural em vez de lembrete.
+      await bumpConfigVersion(tx);
 
       await tx.insert(auditLogs).values({
         actorUserId: session.userId,

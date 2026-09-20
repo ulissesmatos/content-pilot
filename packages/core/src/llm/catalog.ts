@@ -126,6 +126,32 @@ export function normalizeOpenAiModels(body: unknown): CatalogModel[] {
   });
 }
 
+/** Modelos de geração de imagem da OpenAI — o inverso do filtro de chat acima. */
+const OPENAI_IMAGE_GEN = /^(gpt-image|dall-e)/i;
+
+export function normalizeOpenAiImageModels(body: unknown): CatalogModel[] {
+  return asArray(body).flatMap((entry) => {
+    const m = entry as Record<string, unknown>;
+    const modelId = typeof m.id === 'string' ? m.id : null;
+    if (!modelId || !OPENAI_IMAGE_GEN.test(modelId)) return [];
+    return [
+      {
+        provider: 'openai' as const,
+        modelId,
+        displayName: modelId,
+        contextLength: null,
+        maxOutputTokens: null,
+        inputPricePerMtok: null,
+        outputPricePerMtok: null,
+        priceSource: 'unknown' as const,
+        supportsVision: false,
+        supportsStructuredOutput: false,
+        raw: entry,
+      },
+    ];
+  });
+}
+
 export function normalizeAnthropicModels(body: unknown): CatalogModel[] {
   return asArray(body).flatMap((entry) => {
     const m = entry as Record<string, unknown>;
@@ -225,6 +251,15 @@ export async function fetchOpenAiModels(
   opts: FetchOpts = {},
 ): Promise<CatalogModel[]> {
   return normalizeOpenAiModels(
+    await getJson(OPENAI_MODELS_URL, { Authorization: `Bearer ${apiKey}` }, opts),
+  );
+}
+
+export async function fetchOpenAiImageModels(
+  apiKey: string,
+  opts: FetchOpts = {},
+): Promise<CatalogModel[]> {
+  return normalizeOpenAiImageModels(
     await getJson(OPENAI_MODELS_URL, { Authorization: `Bearer ${apiKey}` }, opts),
   );
 }

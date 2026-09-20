@@ -4,6 +4,7 @@ import { stripDiacritics } from '../i18n/slug';
 import type { JsonSchema, LlmProvider } from '../llm/types';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import type { ImageCandidate, ImageSearchClient } from './openverse';
+import type { ImageGenClient } from './generate';
 
 /**
  * Ilustração de artigo (Fase 3): busca imagens (web + acervo aberto), mostra as
@@ -15,6 +16,8 @@ import type { ImageCandidate, ImageSearchClient } from './openverse';
 
 export interface ChosenImage extends ImageCandidate {
   alt: string;
+  /** Presente só na capa gerada pelo GPT (fallback) — bytes já prontos, sem download por URL. */
+  inlineData?: { data: Uint8Array; mimeType: string };
 }
 
 export interface IllustrateInput {
@@ -31,17 +34,25 @@ export interface IllustrateInput {
 export interface IllustrateDeps {
   images: ImageSearchClient;
   llmVision: LlmProvider;
+  /**
+   * Último recurso: gera a capa com IA quando nenhuma candidata passa na
+   * revisão de qualidade. Opcional — sem isto, o comportamento é o de sempre
+   * (post sem capa em vez de capa errada).
+   */
+  imageGen?: ImageGenClient;
   checkBudget?: () => Promise<void> | void;
   log?: (msg: string) => void;
 }
 
 export interface IllustrateResult {
   status: 'ok' | 'no_candidates' | 'none_relevant' | 'llm_failed' | 'budget_exceeded';
-  /** Imagem destacada (capa) — null quando nenhuma candidata serviu. */
+  /** Imagem destacada (capa) — null quando nenhuma candidata serviu nem a geração de IA. */
   cover: ChosenImage | null;
   /** Imagens escolhidas para o corpo do texto (podem existir mesmo sem capa). */
   inline: ChosenImage[];
   candidatesCount: number;
+  /** true quando a capa não veio de uma candidata real — foi gerada com IA como último recurso. */
+  coverGenerated: boolean;
   llmCalls: LlmCallRecord[];
 }
 
@@ -95,17 +106,32 @@ function buildResponseSchema(): JsonSchema {
     required: ['index', 'alt'],
     additionalProperties: false,
   };
+  const coverPick = {
+    type: 'object',
+    properties: {
+      ...pick.properties,
+      qualityOk: {
+        type: 'boolean',
+        description:
+          'true só se a imagem tiver boa resolução (nítida, não pixelada/esticada), NÃO tiver marca d\'água ou logo de outro site, e for uma imagem limpa (sem faixas de UI, sem print de tela). false em qualquer outro caso — mesmo que a imagem seja a mais relevante do lote.',
+      },
+    },
+    required: ['index', 'alt', 'qualityOk'],
+    additionalProperties: false,
+  };
   return {
     type: 'object',
     properties: {
       cover: {
-        ...pick,
-        description: 'Imagem de capa do artigo. index = -1 se NENHUMA candidata serve como capa.',
+        ...coverPick,
+        description:
+          'Imagem de capa do artigo. index = -1 se NENHUMA candidata serve como capa (tema errado OU falha de qualidade).',
       },
       inline: {
         type: 'array',
         items: pick,
-        description: 'Imagens para o corpo do texto (índices diferentes da capa). Lista vazia se nenhuma ajudar.',
+        description:
+          'Imagens para o corpo do texto (índices diferentes da capa). Você decide QUANTAS incluir, de 0 até o limite informado — só as que realmente ajudam o leitor, com boa qualidade visual (sem marca d\'água, sem logo de outro site, sem parecer print de tela). Lista vazia é aceitável e preferível a imagem fraca.',
       },
       reason: { type: 'string' },
     },
@@ -126,12 +152,12 @@ As imagens candidatas estão anexadas nesta ordem (índice: título):
 ${list}
 
 TAREFAS:
-1. CAPA: escolha a MELHOR imagem de capa. Critérios rígidos: mostra o assunto do artigo em si (não algo apenas vagamente relacionado, como um componente ou acessório quando o tema é o produto), boa qualidade visual, de preferência horizontal, sem marca d'água, sem texto dominante, sem parecer print de site. Se NENHUMA candidata cumprir os critérios, devolva cover.index = -1 — capa nenhuma é melhor que capa errada.
-2. CORPO: escolha até ${inlineCount} OUTRAS imagens (índices diferentes da capa e entre si) que ilustrem bem aspectos do tema, para inserir entre os parágrafos. Só inclua as realmente úteis; lista vazia é aceitável.
+1. CAPA: escolha a MELHOR imagem de capa. Critérios rígidos, TODOS obrigatórios: (a) mostra o assunto do artigo em si, não algo apenas vagamente relacionado; (b) boa resolução — nítida, não pixelada, não esticada/borrada; (c) SEM marca d'água nem logo de outro site/marca estampado na imagem; (d) imagem limpa — sem parecer print de tela, sem faixas de UI, sem texto dominante sobreposto. Se a melhor imagem disponível falhar em QUALQUER um desses critérios, marque qualityOk=false. Se NENHUMA candidata cumprir os critérios (ou não houver imagem com o tema certo), devolva cover.index = -1 — capa nenhuma é melhor que capa errada ou de baixa qualidade.
+2. CORPO: você decide QUANTAS imagens usar no corpo do texto, de 0 até ${inlineCount} (índices diferentes da capa e entre si). Escolha só as que realmente ajudam o leitor a entender o tema E têm boa qualidade visual (mesmos critérios da capa, sem marca d'água/logo de outro site). Não preencha até o limite só por preencher — lista vazia é aceitável e preferível a imagem fraca.
 3. Para CADA imagem escolhida, escreva um alt descritivo e específico (o que aparece na imagem, ligado ao tema).
 
 Responda exclusivamente com um objeto JSON válido, sem markdown:
-{ "cover": { "index": número ou -1, "alt": "..." }, "inline": [ { "index": número, "alt": "..." } ], "reason": "1 frase" }`;
+{ "cover": { "index": número ou -1, "alt": "...", "qualityOk": true ou false }, "inline": [ { "index": número, "alt": "..." } ], "reason": "1 frase" }`;
   }
   return `You are the photo editor for a blog article about "${input.topic}".
 
@@ -139,17 +165,18 @@ The candidate images are attached in this order (index: title):
 ${list}
 
 TASKS:
-1. COVER: pick the BEST cover image. Strict criteria: shows the article's actual subject (not something only loosely related, like a component or accessory when the topic is the product), good visual quality, preferably landscape, no watermark, no dominant text, not a website screenshot. If NO candidate meets the bar, return cover.index = -1 — no cover beats a wrong cover.
-2. BODY: pick up to ${inlineCount} OTHER images (indexes different from the cover and from each other) that illustrate aspects of the topic well, to place between paragraphs. Only include genuinely helpful ones; an empty list is fine.
+1. COVER: pick the BEST cover image. Strict criteria, ALL mandatory: (a) shows the article's actual subject, not something only loosely related; (b) good resolution — sharp, not pixelated, not stretched/blurry; (c) NO watermark or another site's/brand's logo stamped on it; (d) clean image — not a screenshot, no UI chrome, no dominant overlaid text. If the best available image fails ANY of these, set qualityOk=false. If NO candidate meets the bar (wrong subject or none has an image with the right topic), return cover.index = -1 — no cover beats a wrong or low-quality one.
+2. BODY: you decide HOW MANY images to use in the body, from 0 up to ${inlineCount} (indexes different from the cover and from each other). Only pick ones that genuinely help the reader AND have good visual quality (same bar as the cover, no watermark/other site's logo). Don't fill up to the limit just to fill it — an empty list is fine and preferable to a weak image.
 3. For EACH chosen image, write descriptive, specific alt text (what it shows, tied to the topic).
 
 Respond exclusively with a valid JSON object, no markdown:
-{ "cover": { "index": number or -1, "alt": "..." }, "inline": [ { "index": number, "alt": "..." } ], "reason": "one sentence" }`;
+{ "cover": { "index": number or -1, "alt": "...", "qualityOk": true or false }, "inline": [ { "index": number, "alt": "..." } ], "reason": "one sentence" }`;
 }
 
 interface IllustratePick {
   index?: unknown;
   alt?: unknown;
+  qualityOk?: unknown;
 }
 
 interface IllustrateParsed {
@@ -164,7 +191,14 @@ interface IllustrateParsed {
 export async function illustrate(input: IllustrateInput, deps: IllustrateDeps): Promise<IllustrateResult> {
   const log = deps.log ?? (() => {});
   const llmCalls: LlmCallRecord[] = [];
-  const base: IllustrateResult = { status: 'ok', cover: null, inline: [], candidatesCount: 0, llmCalls };
+  const base: IllustrateResult = {
+    status: 'ok',
+    cover: null,
+    inline: [],
+    candidatesCount: 0,
+    coverGenerated: false,
+    llmCalls,
+  };
   const inlineCount = Math.max(input.inlineCount ?? 0, 0);
 
   const query = buildQuery(input);
@@ -175,7 +209,11 @@ export async function illustrate(input: IllustrateInput, deps: IllustrateDeps): 
   const pool = await deps.images.search(query, { limit: Math.max(maxCandidates * 3, 12) });
   const candidates = rankCandidates(pool, input, maxCandidates);
   base.candidatesCount = candidates.length;
-  if (candidates.length === 0) return { ...base, status: 'no_candidates' };
+  if (candidates.length === 0) {
+    const generated = await generateFallbackCover(input, deps, log);
+    if (generated) return { ...base, status: 'ok', cover: generated, coverGenerated: true };
+    return { ...base, status: 'no_candidates' };
+  }
 
   try {
     await deps.checkBudget?.();
@@ -224,7 +262,11 @@ export async function illustrate(input: IllustrateInput, deps: IllustrateDeps): 
   }
 
   const coverIndex = Number(parsed?.cover?.index ?? parsed?.index);
-  const validCover = Number.isInteger(coverIndex) && coverIndex >= 0 && coverIndex < candidates.length;
+  const inRange = Number.isInteger(coverIndex) && coverIndex >= 0 && coverIndex < candidates.length;
+  // Tolera o formato antigo/achatado (sem qualityOk): trata como aprovado.
+  const qualityOk = parsed?.cover?.qualityOk !== false;
+  const validCover = inRange && qualityOk;
+  if (inRange && !qualityOk) log('ilustração: capa candidata reprovada na revisão de qualidade');
   const cover: ChosenImage | null = validCover
     ? {
         ...candidates[coverIndex]!,
@@ -244,12 +286,52 @@ export async function illustrate(input: IllustrateInput, deps: IllustrateDeps): 
     inline.push({ ...candidates[idx]!, alt: String(item?.alt ?? '').trim() || input.topic });
   }
 
-  if (!cover && inline.length === 0) {
-    log('ilustração: nenhuma imagem relevante — post sem imagem');
-    return { ...base, status: 'none_relevant' };
+  if (!cover) {
+    const generated = await generateFallbackCover(input, deps, log);
+    if (generated) {
+      log(`ilustração: nenhuma candidata aprovada — capa gerada com IA, ${inline.length} imagem(ns) no corpo`);
+      return { ...base, status: 'ok', cover: generated, coverGenerated: true, inline };
+    }
+    if (inline.length === 0) {
+      log('ilustração: nenhuma imagem relevante — post sem imagem');
+      return { ...base, status: 'none_relevant' };
+    }
   }
   log(
     `ilustração: capa ${cover ? `${coverIndex} (${cover.license})` : 'nenhuma'}, ${inline.length} imagem(ns) no corpo`,
   );
   return { ...base, status: 'ok', cover, inline };
+}
+
+/**
+ * Último recurso: gera a capa com IA (OpenAI) quando nada da web/acervo
+ * serviu. Falha na geração nunca derruba o pipeline — cai no comportamento
+ * de sempre (post sem capa).
+ */
+async function generateFallbackCover(
+  input: IllustrateInput,
+  deps: IllustrateDeps,
+  log: (msg: string) => void,
+): Promise<ChosenImage | null> {
+  if (!deps.imageGen) return null;
+  const prompt = `Editorial illustration for a blog article about "${input.topic}"${
+    input.keywords.length ? ` (${input.keywords.slice(0, 3).join(', ')})` : ''
+  }. Photorealistic, clean composition, no text, no watermark, no logos.`;
+  log('ilustração: gerando capa com IA (nenhuma candidata aprovada)');
+  const generated = await deps.imageGen.generate(prompt);
+  if (!generated) {
+    log('ilustração: geração de capa com IA falhou');
+    return null;
+  }
+  return {
+    url: 'generated:openai',
+    thumbnail: 'generated:openai',
+    title: input.topic,
+    license: 'generated',
+    attribution: '',
+    sourcePage: '',
+    provider: 'openai-generated',
+    alt: input.topic,
+    inlineData: generated,
+  };
 }

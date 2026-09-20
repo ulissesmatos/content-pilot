@@ -287,7 +287,26 @@
     "colCreatedAt": "Criada em",
     "platformBadge": "Plataforma",
     "never": "nunca",
-    "ownKeysNotice": "Sua conta usa exclusivamente suas próprias chaves de IA e Tavily (BYOK). Cadastre-as para gerar conteúdo. Os provedores podem cobrar pelo uso. O provedor de IA deve corresponder ao modelo configurado pelo administrador (OpenRouter na configuração inicial)."
+    "ownKeysNotice": "Sua conta usa exclusivamente suas próprias chaves de IA e Tavily (BYOK). Cadastre-as para gerar conteúdo. Os provedores podem cobrar pelo uso. Sem uma escolha sua, o sistema usa o modelo padrão do administrador (OpenRouter na configuração inicial) e cai automaticamente para outro provedor seu se essa chave não existir.",
+    "aiSettings": {
+      "title": "IA ativa",
+      "description": "Escolha o provedor e o modelo usados para gerar texto e revisar imagens. Sem escolha, vale o padrão do administrador — ou, na falta da chave dele, outra chave sua disponível.",
+      "providerLabel": "Provedor ativo",
+      "providerDefault": "Padrão da plataforma (automático)",
+      "modelLabel": "Modelo",
+      "modelPlaceholder": "Selecione um modelo",
+      "loadingModels": "Buscando modelos...",
+      "noCredentialForProvider": "Cadastre uma credencial deste provedor para escolher o modelo.",
+      "save": "Salvar",
+      "saved": "Preferência de IA salva.",
+      "visionBadge": "com visão",
+      "imageGenTitle": "Geração de imagem (último recurso)",
+      "imageGenDescription": "Se nenhuma imagem da web/acervo passar na revisão de qualidade (resolução, marca d'água, logo de outro site), a capa é gerada com IA. Exige credencial OpenAI própria.",
+      "imageGenEnable": "Ativar geração de imagem com IA",
+      "imageGenModelLabel": "Modelo de imagem",
+      "imageGenSaved": "Preferência de geração de imagem salva.",
+      "imageGenNoCredential": "Cadastre uma credencial OpenAI própria para ativar a geração de imagem."
+    }
   },
   "templates": {
     "title": "Templates de conteúdo",

@@ -10,6 +10,7 @@ import {
   suggestedInlineCount,
 } from '@content-pilot/core';
 import {
+  resolveImageGenProvider,
   resolveLlmProvider,
   resolveSearchClient,
   resolveTemplateById,
@@ -210,7 +211,10 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     let finalHtml = result.finalHtml;
     if (template.config.images.enabled) {
       const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
-      const illustrateModel = await resolveTaskModel(db, workspaceId, 'illustrate');
+      const [illustrateModel, imageGen] = await Promise.all([
+        resolveTaskModel(db, workspaceId, 'illustrate'),
+        resolveImageGenProvider(db, workspaceId),
+      ]);
       const llmVision = await resolveLlmProvider(db, workspaceId, illustrateModel);
       const { mediaId, inlineImages, llmCalls } = await illustratePost({
         wp,
@@ -222,6 +226,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         inlineCount,
         search,
         webSearch: template.config.images.webSearch,
+        imageGen: imageGen ?? undefined,
         checkBudget,
         log,
       });

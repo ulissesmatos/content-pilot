@@ -287,7 +287,26 @@
     "colCreatedAt": "Created",
     "platformBadge": "Platform",
     "never": "never",
-    "ownKeysNotice": "Your account exclusively uses your own AI and Tavily keys (BYOK). Add them to generate content. Providers may charge for usage. The AI provider must match the model configured by the administrator (OpenRouter in the initial setup)."
+    "ownKeysNotice": "Your account exclusively uses your own AI and Tavily keys (BYOK). Add them to generate content. Providers may charge for usage. Without a choice of your own, the system uses the administrator's default model (OpenRouter in the initial setup) and automatically falls back to another of your own providers if that key is missing.",
+    "aiSettings": {
+      "title": "Active AI",
+      "description": "Choose the provider and model used to generate text and review images. Without a choice, the administrator's default applies — or, if that key is missing, another key of yours.",
+      "providerLabel": "Active provider",
+      "providerDefault": "Platform default (automatic)",
+      "modelLabel": "Model",
+      "modelPlaceholder": "Select a model",
+      "loadingModels": "Fetching models...",
+      "noCredentialForProvider": "Add a credential for this provider to pick a model.",
+      "save": "Save",
+      "saved": "AI preference saved.",
+      "visionBadge": "vision",
+      "imageGenTitle": "Image generation (last resort)",
+      "imageGenDescription": "If no web/library image passes the quality review (resolution, watermark, another site's logo), the cover is generated with AI instead. Requires your own OpenAI credential.",
+      "imageGenEnable": "Enable AI image generation",
+      "imageGenModelLabel": "Image model",
+      "imageGenSaved": "Image generation preference saved.",
+      "imageGenNoCredential": "Add your own OpenAI credential to enable image generation."
+    }
   },
   "templates": {
     "title": "Content templates",

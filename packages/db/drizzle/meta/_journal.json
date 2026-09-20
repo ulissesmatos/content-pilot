@@ -71,6 +71,20 @@
       "when": 1789860099846,
       "tag": "0009_email_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789865514440,
+      "tag": "0010_marvelous_the_spike",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789865600000,
+      "tag": "0011_workspace_ai_settings_rls",
+      "breakpoints": true
     }
   ]
 }

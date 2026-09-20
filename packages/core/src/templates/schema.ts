@@ -14,6 +14,15 @@ export const templateQuerySchema = z.object({
   template: z.string().min(3),
 });
 
+/**
+ * Tamanho em pixels. Limites existem porque o valor vira o tamanho da imagem
+ * gerada e paga pelo usuário, e porque acima disso o WordPress só reduz.
+ */
+export const imageSizeSchema = z.object({
+  width: z.number().int().min(200).max(3840),
+  height: z.number().int().min(100).max(2160),
+});
+
 export const templatePromptsSchema = z.object({
   /** Prompt de atualização de post existente. */
   update: z.string().min(10),
@@ -99,8 +108,32 @@ export const templateConfigSchema = z.object({
       inlineMax: z.number().int().min(0).max(6).default(3),
       /** Busca imagens na web (Tavily) além do acervo aberto (Openverse) — muito mais relevantes; licença não verificada. */
       webSearch: z.boolean().default(true),
+      /** Usa a imagem de destaque (og:image) das fontes que embasam o artigo. */
+      sourceImages: z.boolean().default(true),
+      /**
+       * Tamanho FINAL da capa. Imagem gerada por IA é recortada até este tamanho
+       * exato; imagem real é recortada com foco no assunto para a capa não sair
+       * com proporção diferente das outras.
+       */
+      cover: imageSizeSchema.default({ width: 1280, height: 720 }),
+      /** Tamanho máximo das imagens do corpo (imagem real só é reduzida, nunca esticada). */
+      inline: imageSizeSchema.default({ width: 1280, height: 720 }),
+      /** Formato do arquivo enviado ao WordPress. WebP é bem menor para a mesma qualidade. */
+      format: z.enum(['webp', 'original']).default('webp'),
+      /** Qualidade do WebP (1-100). */
+      quality: z.number().int().min(40).max(100).default(82),
     })
-    .default({ enabled: false, candidates: 5, inlineMax: 3, webSearch: true }),
+    .default({
+      enabled: false,
+      candidates: 5,
+      inlineMax: 3,
+      webSearch: true,
+      sourceImages: true,
+      cover: { width: 1280, height: 720 },
+      inline: { width: 1280, height: 720 },
+      format: 'webp',
+      quality: 82,
+    }),
   /**
    * Estilo do texto gerado. Ambos opcionais: quando ausentes valem os padrões de
    * `resolveStylePolicy`, o que permite que templates já gravados no banco (e os

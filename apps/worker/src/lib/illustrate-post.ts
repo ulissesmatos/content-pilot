@@ -1,27 +1,55 @@
-import { publicFetch } from '@content-pilot/core';
 import {
   combineImageClients,
-  illustrate,
+  fetchSourceImages,
+  illustrateArticle,
   OpenverseClient,
+  publicFetch,
   slugify,
   WebImageSearchClient,
   type ChosenImage,
   type CmsAdapter,
   type ImageGenClient,
+  type ImageReport,
+  type ImageReportItem,
   type ImageSearchClient,
+  type ImageSize,
   type InlineImage,
   type LlmCallRecord,
   type LlmProvider,
   type SearchClient,
 } from '@content-pilot/core';
+import { imageFilename, prepareCandidate, processForUpload } from './image-processing';
+
+/** Imagem do corpo já no WordPress, com o slot a que pertence. */
+export interface UploadedInline {
+  /** Posição do slot entre as imagens do corpo: onde `injectPlannedImages` a põe. */
+  slotIndex: number;
+  image: InlineImage;
+}
+
+export interface IllustratePostResult {
+  /** ID da imagem destacada. Null quando nada produziu capa. */
+  mediaId: number | null;
+  /** Imagens do corpo, cada uma com o índice do próprio slot. */
+  inline: UploadedInline[];
+  /** Quantos slots do corpo foram planejados (para posicionar sem deslizar). */
+  plannedInline: number;
+  /** Nenhuma capa: o post NÃO deve ser publicado. */
+  coverMissing: boolean;
+  llmCalls: LlmCallRecord[];
+  /** Uma linha por slot: de onde veio a imagem, ou por que não veio. */
+  notes: string[];
+  /** O que entrou de imagem e de onde veio; gravado na pauta para a tela de preview. */
+  report: ImageReport;
+}
 
 /**
- * Ilustra um post: busca imagens (web via Tavily + Openverse), um LLM com visão
- * escolhe a capa e as imagens do corpo (ou nenhuma), baixa e faz upload na
- * mídia do WordPress. Retorna o ID da capa (imagem destacada) e as imagens do
- * corpo já com URL pública do WP — ou vazio se nada serviu (o post é publicado
- * sem imagem; nunca uma imagem errada). Se o download da capa falhar, a melhor
- * imagem do corpo é promovida a capa (capa tem prioridade).
+ * Ilustra um post: cada imagem (capa e corpo) é um slot com busca própria,
+ * escolha pela visão e, se nada serve, geração por IA no tamanho do slot. O que
+ * sai vai para o WordPress convertido em WebP, no tamanho configurado.
+ *
+ * A capa é obrigatória: se nenhum meio a produzir, `coverMissing` avisa o
+ * chamador para não publicar. Falha em imagem do corpo só pula aquela imagem.
  */
 export async function illustratePost(opts: {
   wp: CmsAdapter;
@@ -29,18 +57,24 @@ export async function illustratePost(opts: {
   topic: string;
   keywords: string[];
   language: string;
+  /** HTML final do artigo: dele saem as posições e o contexto de cada imagem. */
+  html: string;
   candidates: number;
-  /** Quantas imagens para o corpo do texto (0 = só capa). */
-  inlineCount?: number;
-  /** Cliente de busca (Tavily) para imagens da web — mais relevantes que só o acervo aberto. */
+  inlineCount: number;
+  coverSize: ImageSize;
+  inlineSize: ImageSize;
+  format: 'webp' | 'original';
+  quality: number;
+  /** URLs das fontes do artigo: dali vem a imagem de destaque de cada matéria. */
+  sourceUrls?: string[];
+  /** Cliente de busca (Tavily) para imagens da web. */
   search?: SearchClient;
-  /** Desliga a busca de imagens na web (fica só o Openverse). */
   webSearch?: boolean;
-  /** Último recurso: gera a capa com IA quando nenhuma candidata passa na revisão de qualidade. */
+  useSourceImages?: boolean;
   imageGen?: ImageGenClient;
   checkBudget?: () => Promise<void> | void;
   log?: (msg: string) => void;
-}): Promise<{ mediaId: number | null; inlineImages: InlineImage[]; llmCalls: LlmCallRecord[] }> {
+}): Promise<IllustratePostResult> {
   const log = opts.log ?? (() => {});
 
   // web primeiro (relevância), Openverse como reforço (licença aberta garantida)
@@ -48,16 +82,24 @@ export async function illustratePost(opts: {
   if (opts.webSearch !== false && opts.search?.searchImages) providers.push(new WebImageSearchClient(opts.search));
   providers.push(new OpenverseClient());
 
-  const ill = await illustrate(
+  const ill = await illustrateArticle(
     {
       topic: opts.topic,
       keywords: opts.keywords,
       language: opts.language,
+      html: opts.html,
+      inlineCount: opts.inlineCount,
+      coverSize: opts.coverSize,
+      inlineSize: opts.inlineSize,
       maxCandidates: opts.candidates,
-      inlineCount: opts.inlineCount ?? 0,
     },
     {
       images: combineImageClients(providers),
+      sourceImages:
+        opts.useSourceImages !== false && opts.sourceUrls?.length
+          ? () => fetchSourceImages(opts.sourceUrls!, { fetchImpl: publicFetch })
+          : undefined,
+      prepare: (candidate, slot) => prepareCandidate(candidate, slot.role),
       llmVision: opts.llmVision,
       imageGen: opts.imageGen,
       checkBudget: opts.checkBudget,
@@ -65,106 +107,102 @@ export async function illustratePost(opts: {
     },
   );
 
-  if (ill.status !== 'ok') {
-    log(`ilustração: sem imagem (${ill.status})`);
-    return { mediaId: null, inlineImages: [], llmCalls: ill.llmCalls };
-  }
+  const base = slugify(opts.topic, { maxLength: 60, fallback: 'imagem' });
+  const items: ImageReportItem[] = [];
+  const upload = async (img: ChosenImage, role: 'cover' | 'inline') => {
+    const done = await uploadChosen(opts.wp, img, role, base, opts, log);
+    if (done) {
+      items.push({
+        slotId: role === 'cover' ? 'cover' : img.slot.id,
+        role,
+        origin: img.origin,
+        mediaId: done.media.id,
+        url: done.media.sourceUrl,
+        alt: img.alt,
+        caption: img.caption || undefined,
+        width: done.width || undefined,
+        height: done.height || undefined,
+        sourcePage: img.sourcePage || undefined,
+      });
+    }
+    return done?.media ?? null;
+  };
 
-  const inlineQueue = [...ill.inline];
-
-  // Capa: tenta a escolhida; se o download/upload falhar, promove a próxima do corpo.
+  // Capa: tenta a escolhida; se o envio falhar, promove a próxima imagem do corpo.
   let mediaId: number | null = null;
+  const inlineQueue = [...ill.inline];
   let cover = ill.cover;
   while (cover) {
-    const media = await uploadImage(opts.wp, cover, opts.topic, log);
+    const media = await upload(cover, 'cover');
     if (media) {
       mediaId = media.id;
       break;
     }
-    log('ilustração: capa falhou — promovendo a próxima imagem do corpo a capa');
+    log('ilustração: envio da capa falhou, promovendo a próxima imagem do corpo a capa');
     cover = inlineQueue.shift() ?? null;
   }
 
-  // Imagens do corpo: falha individual só pula a imagem.
-  const inlineImages: InlineImage[] = [];
+  // Imagens do corpo: falha individual só pula a imagem, e as demais mantêm o ponto do próprio slot.
+  const inline: UploadedInline[] = [];
   for (const img of inlineQueue) {
-    const media = await uploadImage(opts.wp, img, opts.topic, log);
-    if (media) inlineImages.push({ url: media.sourceUrl, alt: img.alt, caption: img.attribution || undefined });
+    const media = await upload(img, 'inline');
+    if (media && img.slot.inlineIndex !== undefined) {
+      inline.push({
+        slotIndex: img.slot.inlineIndex,
+        image: { url: media.sourceUrl, alt: img.alt, caption: img.caption || undefined, mediaId: media.id },
+      });
+    }
   }
 
+  const coverMissing = mediaId === null;
   if (mediaId) log(`ilustração: capa enviada ao WP (media #${mediaId})`);
-  if (inlineImages.length) log(`ilustração: ${inlineImages.length} imagem(ns) do corpo enviadas ao WP`);
-  return { mediaId, inlineImages, llmCalls: ill.llmCalls };
+  if (inline.length) log(`ilustração: ${inline.length} imagem(ns) do corpo enviadas ao WP`);
+  if (coverMissing) log('ilustração: o post ficou SEM capa');
+  return {
+    mediaId,
+    inline,
+    plannedInline: ill.plannedInline,
+    coverMissing,
+    llmCalls: ill.llmCalls,
+    notes: ill.notes,
+    report: { coverMissing, plannedInline: ill.plannedInline, images: items, notes: ill.notes },
+  };
 }
 
-async function uploadImage(
+async function uploadChosen(
   wp: CmsAdapter,
   img: ChosenImage,
-  topic: string,
+  role: 'cover' | 'inline',
+  base: string,
+  cfg: { format: 'webp' | 'original'; quality: number; coverSize: ImageSize; inlineSize: ImageSize },
   log: (msg: string) => void,
-): Promise<{ id: number; sourceUrl: string } | null> {
-  // capa gerada por IA: bytes já prontos, sem download por URL
-  const downloaded = img.inlineData ?? (await downloadImage(img.url));
-  if (!downloaded) {
-    log(`ilustração: download falhou (${img.url.slice(0, 80)})`);
-    return null;
-  }
+): Promise<{ media: { id: number; sourceUrl: string }; width: number; height: number } | null> {
+  const file = await processForUpload(
+    { data: img.original.data, mimeType: img.original.mimeType },
+    {
+      size: role === 'cover' ? cfg.coverSize : cfg.inlineSize,
+      role,
+      format: cfg.format,
+      quality: cfg.quality,
+      generated: img.origin === 'generated',
+    },
+  );
+  const suffix = role === 'cover' ? 'capa' : img.slot.id.replace('inline-', '');
   try {
-    return await wp.uploadMedia({
-      data: downloaded.data,
-      filename: `${slugify(topic, { maxLength: 60, fallback: 'imagem' })}.${extFor(downloaded.mimeType)}`,
-      mimeType: downloaded.mimeType,
+    const media = await wp.uploadMedia({
+      data: file.data,
+      filename: imageFilename(`${base}-${suffix}`, file.extension),
+      mimeType: file.mimeType,
       alt: img.alt,
-      caption: img.attribution || undefined,
+      caption: img.caption || undefined,
     });
+    log(
+      `ilustração [${img.slot.id}]: ${file.extension.toUpperCase()} ${file.width || '?'}x${file.height || '?'} ` +
+        `(${(file.data.byteLength / 1024).toFixed(0)} KB, ${img.origin === 'generated' ? 'gerada por IA' : 'imagem real'})`,
+    );
+    return { media, width: file.width, height: file.height };
   } catch (err) {
-    log(`ilustração: upload falhou (${err instanceof Error ? err.message : String(err)})`);
+    log(`ilustração [${img.slot.id}]: upload falhou (${err instanceof Error ? err.message : String(err)})`);
     return null;
   }
-}
-
-async function downloadImage(url: string): Promise<{ data: Uint8Array; mimeType: string } | null> {
-  try {
-    const res = await publicFetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!res.ok) return null;
-    const mimeType = (res.headers.get('content-type') ?? 'image/jpeg').split(';')[0]!.trim();
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType)) {
-      await res.body?.cancel();
-      return null;
-    }
-    if (Number(res.headers.get('content-length')) > 8_000_000) {
-      await res.body?.cancel();
-      return null;
-    }
-    const reader = res.body?.getReader();
-    if (!reader) return null;
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > 8_000_000) { await reader.cancel(); return null; }
-      chunks.push(value);
-    }
-    const data = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength; }
-    // sanidade: 5KB..8MB (evita ícones minúsculos e arquivos gigantes — capa precisa de resolução)
-    if (data.byteLength < 5_000 || data.byteLength > 8_000_000) return null;
-    return { data, mimeType };
-  } catch {
-    return null;
-  }
-}
-
-function extFor(mimeType: string): string {
-  const map: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
-    'image/png': 'png',
-    'image/webp': 'webp',
-    'image/gif': 'gif',
-  };
-  return map[mimeType] ?? 'jpg';
 }

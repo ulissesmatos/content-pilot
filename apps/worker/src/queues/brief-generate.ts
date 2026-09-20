@@ -2,12 +2,14 @@ import { assertWorkerWorkspace } from '../lib/tenant';
 import { briefs, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
 import {
   checkTopicAlreadyCovered,
-  injectInlineImages,
+  emptyImageReport,
+  injectPlannedImages,
   jobLlmConfigSchema,
   PlanLimitError,
   runPipeline,
   slugify,
   suggestedInlineCount,
+  type ImageReport,
 } from '@content-pilot/core';
 import {
   preflightLlmTasks,
@@ -224,6 +226,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     // fazia todo post sair sem capa, em silêncio.
     let featuredMediaId: number | undefined;
     let finalHtml = result.finalHtml;
+    let imageReport: ImageReport = emptyImageReport();
     if (template.config.images.enabled) {
       const inlineCount = suggestedInlineCount(finalHtml, template.config.images.inlineMax);
       const illustrateModel = await resolveTaskModel(db, workspaceId, 'illustrate');
@@ -239,30 +242,48 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
           resolveLlmProvider(db, workspaceId, illustrateModel),
           resolveImageGenProvider(db, workspaceId),
         ]);
-        const { mediaId, inlineImages, llmCalls } = await illustratePost({
+        const ill = await illustratePost({
           wp,
           llmVision,
           topic: brief.topic,
           keywords: brief.keywords ?? [],
           language: brief.language,
+          html: finalHtml,
           candidates: template.config.images.candidates,
           inlineCount,
+          coverSize: template.config.images.cover,
+          inlineSize: template.config.images.inline,
+          format: template.config.images.format,
+          quality: template.config.images.quality,
+          // a imagem de destaque das próprias fontes do artigo é a mais relevante que existe
+          sourceUrls: result.sources.map((s) => s.url),
+          useSourceImages: template.config.images.sourceImages,
           search,
           webSearch: template.config.images.webSearch,
           imageGen: imageGen ?? undefined,
           checkBudget,
           log,
         });
-        featuredMediaId = mediaId ?? undefined;
-        if (inlineImages.length > 0) finalHtml = injectInlineImages(finalHtml, inlineImages);
-        result.llmCalls.push(...llmCalls); // registra os tokens da visão no run
+        featuredMediaId = ill.mediaId ?? undefined;
+        // cada imagem volta ao ponto do PRÓPRIO slot: se uma falhou, as outras não deslizam
+        finalHtml = injectPlannedImages(finalHtml, ill.plannedInline, ill.inline);
+        result.llmCalls.push(...ill.llmCalls); // registra os tokens da visão no run
+        imageReport = ill.report;
       }
+    }
+
+    // Capa é obrigatória. Sem ela o post NUNCA sai publicado, nem no modo automático:
+    // vira rascunho com o motivo no log, e a tela de preview oferece gerar a capa.
+    const coverMissing = template.config.images.enabled && !featuredMediaId;
+    const publishMode = coverMissing ? 'draft' : brief.publishMode;
+    if (coverMissing && brief.publishMode === 'publish') {
+      log('post NÃO publicado: nenhuma capa foi obtida. Criado como rascunho para você resolver a capa.');
     }
 
     const created = await wp.createPost({
       title: result.newTitle ?? brief.topic,
       content: finalHtml,
-      status: brief.publishMode,
+      status: publishMode,
       categories: categoryId ? [categoryId] : undefined,
       featuredMediaId,
       // meta description SEO como excerpt do WP; cai no resumo de mudanças.
@@ -292,16 +313,17 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     await db
       .update(briefs)
       .set({
-        status: brief.publishMode === 'publish' ? 'published' : 'ready_for_review',
+        status: publishMode === 'publish' ? 'published' : 'ready_for_review',
         createdWpPostId: created.id,
         createdWpPostUrl: created.link,
+        imageReport,
         error: null,
         updatedAt: new Date(),
       })
       .where(eq(briefs.id, briefId));
 
     await maybeFinalizeRun(db, runId);
-    log(`post #${created.id} criado (${brief.publishMode}) em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    log(`post #${created.id} criado (${publishMode}) em ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
   } catch (err) {
     await fail(err instanceof Error ? err.message : String(err));
   } finally {

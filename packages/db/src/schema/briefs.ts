@@ -31,6 +31,11 @@ export const briefs = pgTable('briefs', {
   createdWpPostId: integer('created_wp_post_id'),
   createdWpPostUrl: text('created_wp_post_url'),
   llmConfig: jsonb('llm_config'),
+  /**
+   * O que entrou de imagem e de onde veio (ver `ImageReport` no core). Guardado
+   * porque o HTML não diz se uma imagem foi gerada por IA, nem que a capa falta.
+   */
+  imageReport: jsonb('image_report'),
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -4,77 +4,89 @@ import { stripDiacritics } from '../i18n/slug';
 import type { JsonSchema, LlmProvider } from '../llm/types';
 import { BudgetExceededError, type LlmCallRecord } from '../pipeline/types';
 import type { ImageCandidate, ImageSearchClient } from './openverse';
-import { ImageGenerationError, type ImageGenClient } from './generate';
+import { ImageGenerationError, type ImageGenClient, type ImageSize } from './generate';
+import { planImageSlots, type ImageSlot } from './slots';
 
 /**
- * Ilustração de artigo (Fase 3): busca imagens (web + acervo aberto), mostra as
- * candidatas para um LLM com visão escolher a capa e as imagens do corpo do
- * texto (ou nenhuma) e gera alt text de cada uma. Fail-safe: se nada for
- * relevante, o post sai sem imagem — nunca uma imagem errada.
- * Funciona em modelos com visão baratos (gpt-4.1-mini, claude-haiku).
+ * Ilustração de artigo, por slot.
+ *
+ * Cada imagem (capa e corpo) é um slot com sua própria busca, sua própria
+ * chamada de visão e, quando nada serve, um fallback de geração por IA no
+ * tamanho do slot. Fail-safe continua valendo: melhor sem imagem do que com uma
+ * errada. A capa é a exceção que o produto exige: ela tem prioridade em tudo e,
+ * se faltar no fim, o chamador é avisado (`coverMissing`) para não publicar.
  */
 
-export interface ChosenImage extends ImageCandidate {
+/** Imagem já baixada, medida e reduzida para a visão. Quem prepara é o worker (sharp). */
+export interface PreparedImage {
+  candidate: ImageCandidate;
+  /** Miniatura para a visão. Data URL base64: o provedor de IA não baixa nada. */
+  thumbnail: string;
+  original: { data: Uint8Array; mimeType: string; width: number; height: number };
+}
+
+export interface ChosenImage {
+  slot: ImageSlot;
+  origin: 'search' | 'source' | 'generated';
   alt: string;
-  /** Presente só na capa gerada pelo GPT (fallback) — bytes já prontos, sem download por URL. */
-  inlineData?: { data: Uint8Array; mimeType: string };
+  /** Crédito para a legenda; vazio quando a licença é desconhecida ou a imagem é gerada. */
+  caption: string;
+  license: string;
+  sourcePage: string;
+  original: { data: Uint8Array; mimeType: string; width: number; height: number };
 }
 
 export interface IllustrateInput {
   topic: string;
   keywords: string[];
   language: string;
-  /** Quantas candidatas buscar/mostrar ao modelo (default 5). */
+  /** HTML final do artigo: dele saem as posições e o contexto de cada slot. */
+  html: string;
+  inlineCount: number;
+  coverSize: ImageSize;
+  inlineSize: ImageSize;
+  /** Quantas candidatas mostrar à visão por slot (default 6). */
   maxCandidates?: number;
-  /** Quantas imagens para o corpo do texto além da capa (default 0 = só capa). */
-  inlineCount?: number;
   imageMaxTokens?: number;
 }
 
 export interface IllustrateDeps {
+  /** Busca (web + acervo aberto). Chamada uma vez por slot, com a consulta do slot. */
   images: ImageSearchClient;
+  /** Imagens de destaque das fontes do artigo (og:image). */
+  sourceImages?: () => Promise<ImageCandidate[]>;
+  /** Baixa, valida e reduz. `null` descarta o candidato (falhou, pequeno demais, banner...). */
+  prepare: (candidate: ImageCandidate, slot: ImageSlot) => Promise<PreparedImage | null>;
   llmVision: LlmProvider;
-  /**
-   * Último recurso: gera a capa com IA quando nenhuma candidata passa na
-   * revisão de qualidade. Opcional — sem isto, o comportamento é o de sempre
-   * (post sem capa em vez de capa errada).
-   */
+  /** Fallback: gera a imagem quando nenhuma candidata serve. */
   imageGen?: ImageGenClient;
   checkBudget?: () => Promise<void> | void;
   log?: (msg: string) => void;
 }
 
 export interface IllustrateResult {
-  status: 'ok' | 'no_candidates' | 'none_relevant' | 'llm_failed' | 'budget_exceeded';
-  /** Imagem destacada (capa) — null quando nenhuma candidata serviu nem a geração de IA. */
+  status: 'ok' | 'no_images' | 'budget_exceeded';
   cover: ChosenImage | null;
-  /** Imagens escolhidas para o corpo do texto (podem existir mesmo sem capa). */
   inline: ChosenImage[];
-  candidatesCount: number;
-  /** true quando a capa não veio de uma candidata real — foi gerada com IA como último recurso. */
-  coverGenerated: boolean;
+  /** Nenhum meio produziu capa. O chamador NÃO deve publicar o post. */
+  coverMissing: boolean;
+  /** Quantos slots do corpo foram planejados (para `injectPlannedImages`). */
+  plannedInline: number;
   llmCalls: LlmCallRecord[];
-}
-
-function buildQuery(input: IllustrateInput): string {
-  // keywords são termos de busca limpos → melhores para imagem que o tópico
-  // (que pode ter subtítulo/pontuação). Fallback: tópico até o 1º separador.
-  if (input.keywords.length > 0) return input.keywords.slice(0, 2).join(' ').slice(0, 120);
-  return (input.topic.split(/[:\-–|]/)[0] ?? input.topic).trim().slice(0, 120);
+  /** Uma linha por slot: de onde veio a imagem, ou por que não veio. */
+  notes: string[];
 }
 
 const normalizeText = (s: string) => stripDiacritics(s.toLowerCase()).replace(/[^a-z0-9\s]/g, ' ');
 
 /**
  * Pré-rank determinístico (economia de IA): pontua candidatas pela sobreposição
- * de tokens entre título da imagem e tópico/keywords do artigo, e manda para o
- * modelo de visão só as mais promissoras. Buscamos um pool maior no Openverse
- * (grátis) e reduzimos aqui — mesma quantidade de imagens na chamada de visão,
- * pool de melhor qualidade. A decisão final continua sendo da visão (fail-safe).
+ * de tokens entre título da imagem e tópico/keywords do artigo. A decisão final
+ * continua sendo da visão (fail-safe).
  */
 export function rankCandidates(
   candidates: ImageCandidate[],
-  input: Pick<IllustrateInput, 'topic' | 'keywords'>,
+  input: { topic: string; keywords: string[] },
   keep: number,
 ): ImageCandidate[] {
   if (candidates.length <= keep) return candidates;
@@ -84,261 +96,341 @@ export function rankCandidates(
       .filter((t) => t.length > 2),
   );
   const scored = candidates.map((c, i) => {
-    const titleTokensList = normalizeText(c.title).split(/\s+/).filter((t) => t.length > 2);
     let overlap = 0;
-    for (const t of titleTokensList) if (refTokens.has(t)) overlap++;
+    for (const t of normalizeText(c.title).split(/\s+/).filter((t) => t.length > 2)) if (refTokens.has(t)) overlap++;
     return { c, i, score: overlap };
   });
-  // ordena por relevância, empate mantém a ordem do provedor (já é por relevância da busca)
   return scored
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, keep)
     .map((s) => s.c);
 }
 
-function buildResponseSchema(): JsonSchema {
-  const pick = {
-    type: 'object',
-    properties: {
-      index: { type: 'integer', description: 'Índice (base 0) da imagem escolhida.' },
-      alt: { type: 'string', description: 'Texto alternativo descritivo e específico da imagem.' },
-    },
-    required: ['index', 'alt'],
-    additionalProperties: false,
-  };
-  const coverPick = {
-    type: 'object',
-    properties: {
-      ...pick.properties,
-      qualityOk: {
-        type: 'boolean',
-        description:
-          'true só se a imagem tiver boa resolução (nítida, não pixelada/esticada), NÃO tiver marca d\'água ou logo de outro site, e for uma imagem limpa (sem faixas de UI, sem print de tela). false em qualquer outro caso — mesmo que a imagem seja a mais relevante do lote.',
-      },
-    },
-    required: ['index', 'alt', 'qualityOk'],
-    additionalProperties: false,
-  };
-  return {
-    type: 'object',
-    properties: {
-      cover: {
-        ...coverPick,
-        description:
-          'Imagem de capa do artigo. index = -1 se NENHUMA candidata serve como capa (tema errado OU falha de qualidade).',
-      },
-      inline: {
-        type: 'array',
-        items: pick,
-        description:
-          'Imagens para o corpo do texto (índices diferentes da capa). Você decide QUANTAS incluir, de 0 até o limite informado — só as que realmente ajudam o leitor, com boa qualidade visual (sem marca d\'água, sem logo de outro site, sem parecer print de tela). Lista vazia é aceitável e preferível a imagem fraca.',
-      },
-      reason: { type: 'string' },
-    },
-    required: ['cover', 'inline', 'reason'],
-    additionalProperties: false,
-  };
-}
-
-function buildPrompt(input: IllustrateInput, candidates: ImageCandidate[], inlineCount: number): string {
-  const isPt = input.language.toLowerCase().startsWith('pt');
-  const list = candidates
-    .map((c, i) => `${i}: ${c.title || '(sem título)'}`)
-    .join('\n');
-  if (isPt) {
-    return `Você é o editor de imagens de um artigo de blog sobre "${input.topic}".
-
-As imagens candidatas estão anexadas nesta ordem (índice: título):
-${list}
-
-TAREFAS:
-1. CAPA: escolha a MELHOR imagem de capa. Critérios rígidos, TODOS obrigatórios: (a) mostra o assunto do artigo em si, não algo apenas vagamente relacionado; (b) boa resolução — nítida, não pixelada, não esticada/borrada; (c) SEM marca d'água nem logo de outro site/marca estampado na imagem; (d) imagem limpa — sem parecer print de tela, sem faixas de UI, sem texto dominante sobreposto. Se a melhor imagem disponível falhar em QUALQUER um desses critérios, marque qualityOk=false. Se NENHUMA candidata cumprir os critérios (ou não houver imagem com o tema certo), devolva cover.index = -1 — capa nenhuma é melhor que capa errada ou de baixa qualidade.
-2. CORPO: você decide QUANTAS imagens usar no corpo do texto, de 0 até ${inlineCount} (índices diferentes da capa e entre si). Escolha só as que realmente ajudam o leitor a entender o tema E têm boa qualidade visual (mesmos critérios da capa, sem marca d'água/logo de outro site). Não preencha até o limite só por preencher — lista vazia é aceitável e preferível a imagem fraca.
-3. Para CADA imagem escolhida, escreva um alt descritivo e específico (o que aparece na imagem, ligado ao tema).
-
-Responda exclusivamente com um objeto JSON válido, sem markdown:
-{ "cover": { "index": número ou -1, "alt": "...", "qualityOk": true ou false }, "inline": [ { "index": número, "alt": "..." } ], "reason": "1 frase" }`;
-  }
-  return `You are the photo editor for a blog article about "${input.topic}".
-
-The candidate images are attached in this order (index: title):
-${list}
-
-TASKS:
-1. COVER: pick the BEST cover image. Strict criteria, ALL mandatory: (a) shows the article's actual subject, not something only loosely related; (b) good resolution — sharp, not pixelated, not stretched/blurry; (c) NO watermark or another site's/brand's logo stamped on it; (d) clean image — not a screenshot, no UI chrome, no dominant overlaid text. If the best available image fails ANY of these, set qualityOk=false. If NO candidate meets the bar (wrong subject or none has an image with the right topic), return cover.index = -1 — no cover beats a wrong or low-quality one.
-2. BODY: you decide HOW MANY images to use in the body, from 0 up to ${inlineCount} (indexes different from the cover and from each other). Only pick ones that genuinely help the reader AND have good visual quality (same bar as the cover, no watermark/other site's logo). Don't fill up to the limit just to fill it — an empty list is fine and preferable to a weak image.
-3. For EACH chosen image, write descriptive, specific alt text (what it shows, tied to the topic).
-
-Respond exclusively with a valid JSON object, no markdown:
-{ "cover": { "index": number or -1, "alt": "...", "qualityOk": true or false }, "inline": [ { "index": number, "alt": "..." } ], "reason": "one sentence" }`;
-}
-
-interface IllustratePick {
+interface VisionPick {
   index?: unknown;
   alt?: unknown;
   qualityOk?: unknown;
+  fits?: unknown;
+  reason?: unknown;
 }
 
-interface IllustrateParsed {
-  cover?: IllustratePick;
-  inline?: IllustratePick[];
-  /** Tolerância ao formato antigo/achatado (provedores json_object). */
-  images?: IllustratePick[];
-  index?: unknown;
-  alt?: unknown;
+function buildSchema(): JsonSchema {
+  return {
+    type: 'object',
+    properties: {
+      index: { type: 'integer', description: 'Índice (base 0) da imagem escolhida. -1 se NENHUMA serve.' },
+      alt: { type: 'string', description: 'Texto alternativo descritivo e específico.' },
+      qualityOk: {
+        type: 'boolean',
+        description:
+          'true só se a imagem é nítida (não pixelada/esticada), sem marca d\'água, sem logo de outro site, e limpa (sem faixas de UI, sem print de tela).',
+      },
+      fits: { type: 'boolean', description: 'true só se a imagem mostra o assunto deste slot, e não algo vagamente relacionado.' },
+      reason: { type: 'string' },
+    },
+    required: ['index', 'alt', 'qualityOk', 'fits', 'reason'],
+    additionalProperties: false,
+  };
 }
 
-export async function illustrate(input: IllustrateInput, deps: IllustrateDeps): Promise<IllustrateResult> {
+function buildVisionPrompt(slot: ImageSlot, topic: string, prepared: PreparedImage[], language: string): string {
+  const pt = language.toLowerCase().startsWith('pt');
+  const list = prepared.map((p, i) => `${i}: ${p.candidate.title || '(sem título)'}`).join('\n');
+  const role = slot.role === 'cover' ? (pt ? 'CAPA' : 'COVER') : pt ? 'IMAGEM DO CORPO' : 'BODY IMAGE';
+
+  if (pt) {
+    return `Você é o editor de imagens de um blog. Escolha a imagem para: ${role}.
+
+CONTEXTO: ${slot.description}
+
+As candidatas estão anexadas nesta ordem (índice: título):
+${list}
+
+Critérios rígidos, TODOS obrigatórios:
+(a) mostra o assunto deste slot, não algo só vagamente relacionado;
+(b) boa resolução, nítida, sem pixelização nem estiramento;
+(c) SEM marca d'água nem logo de outro site estampado;
+(d) imagem limpa: sem parecer print de tela, sem faixas de interface, sem texto dominante sobreposto${slot.role === 'cover' ? ';\n(e) funciona como miniatura: assunto legível mesmo pequena.' : '.'}
+
+Se nenhuma cumprir TODOS os critérios, devolva index = -1. Imagem nenhuma é melhor que uma errada; o sistema gera uma sob medida.
+Escreva um alt descritivo e específico (o que aparece, ligado ao tema).
+
+Responda exclusivamente com JSON: { "index": número ou -1, "alt": "...", "qualityOk": true|false, "fits": true|false, "reason": "1 frase" }`;
+  }
+  return `You are a blog photo editor. Pick the image for: ${role}.
+
+CONTEXT: ${slot.description}
+
+Candidates are attached in this order (index: title):
+${list}
+
+Strict criteria, ALL mandatory:
+(a) shows this slot's subject, not something loosely related;
+(b) good resolution, sharp, not pixelated or stretched;
+(c) NO watermark or another site's logo stamped on it;
+(d) clean image: not a screenshot, no UI chrome, no dominant overlaid text${slot.role === 'cover' ? ';\n(e) works as a thumbnail: subject readable when small.' : '.'}
+
+If none meets ALL criteria, return index = -1. No image beats a wrong one; the system generates a fitting one.
+Write descriptive, specific alt text.
+
+Respond exclusively with JSON: { "index": number or -1, "alt": "...", "qualityOk": true|false, "fits": true|false, "reason": "one sentence" }`;
+}
+
+/** Prompt de geração: o que o slot pede, no estilo de imagem editorial. */
+export function buildGenerationPrompt(slot: ImageSlot, topic: string): string {
+  const scene = slot.heading ? `${topic}: ${slot.heading}` : topic;
+  const role = slot.role === 'cover' ? 'cover image' : 'in-article illustration';
+  const ratio = slot.size.width >= slot.size.height ? 'wide landscape composition' : 'portrait composition';
+  return [
+    `Editorial ${role} for a blog article about "${scene}".`,
+    slot.role === 'inline' ? `It illustrates this passage: ${slot.description.split(': ').slice(1).join(': ').slice(0, 300)}` : '',
+    `High-quality, ${ratio}, clean, subject clearly visible, natural lighting.`,
+    slot.allowText
+      ? 'Text is allowed only if essential to the subject.'
+      : 'No text, no captions, no watermarks, no logos, no UI elements.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export async function illustrateArticle(input: IllustrateInput, deps: IllustrateDeps): Promise<IllustrateResult> {
   const log = deps.log ?? (() => {});
   const llmCalls: LlmCallRecord[] = [];
-  const base: IllustrateResult = {
+  const notes: string[] = [];
+  const maxCandidates = Math.max(input.maxCandidates ?? 6, 3);
+  const inlineCount = Math.max(input.inlineCount, 0);
+
+  const slots = planImageSlots({
+    topic: input.topic,
+    keywords: input.keywords,
+    html: input.html,
+    inlineCount,
+    coverSize: input.coverSize,
+    inlineSize: input.inlineSize,
+  });
+  log(`ilustração: ${slots.length} imagem(ns) planejada(s) (1 capa + ${slots.length - 1} no corpo)`);
+
+  // Fontes oficiais: buscadas uma vez, servem a todos os slots.
+  let sourcePool: ImageCandidate[] = [];
+  if (deps.sourceImages) {
+    try {
+      sourcePool = await deps.sourceImages();
+      if (sourcePool.length > 0) log(`ilustração: ${sourcePool.length} imagem(ns) de destaque nas fontes do artigo`);
+    } catch {
+      sourcePool = [];
+    }
+  }
+
+  const used = new Set<string>();
+  const result: IllustrateResult = {
     status: 'ok',
     cover: null,
     inline: [],
-    candidatesCount: 0,
-    coverGenerated: false,
+    coverMissing: false,
+    plannedInline: slots.filter((s) => s.role === 'inline').length,
     llmCalls,
+    notes,
   };
-  const inlineCount = Math.max(input.inlineCount ?? 0, 0);
 
-  const query = buildQuery(input);
-  log(`ilustração [busca de imagem]: ${query}`);
-  // pool suficiente para capa + inline com sobra de escolha
-  const maxCandidates = Math.max(input.maxCandidates ?? 5, inlineCount + 3);
-  // pool maior (grátis) → pré-rank determinístico → só as melhores vão à visão
-  const pool = await deps.images.search(query, { limit: Math.max(maxCandidates * 3, 12) });
-  const candidates = rankCandidates(pool, input, maxCandidates);
-  base.candidatesCount = candidates.length;
-  if (candidates.length === 0) {
-    const generated = await generateFallbackCover(input, deps, log);
-    if (generated) return { ...base, status: 'ok', cover: generated, coverGenerated: true };
-    return { ...base, status: 'no_candidates' };
-  }
-
-  try {
-    await deps.checkBudget?.();
-  } catch (err) {
-    if (err instanceof BudgetExceededError) return { ...base, status: 'budget_exceeded' };
-    throw err;
-  }
-
-  let parsed: IllustrateParsed | null;
-  try {
-    const res = await deps.llmVision.complete({
-      prompt: buildPrompt(input, candidates, inlineCount),
-      images: candidates.map((c) => c.thumbnail),
-      schema: buildResponseSchema(),
-      schemaName: 'autopilot_illustrate',
-      maxTokens: input.imageMaxTokens ?? 1_000,
-      temperature: 0,
-    });
-    llmCalls.push({
-      purpose: 'illustrate',
-      provider: res.provider,
-      model: res.model,
-      inputTokens: res.inputTokens,
-      outputTokens: res.outputTokens,
-      costUsd: res.costUsd,
-      durationMs: res.durationMs,
-      status: res.truncated ? 'truncated' : 'ok',
-    });
-    parsed = extractJson(res.text) as IllustrateParsed | null;
-  } catch (err) {
-    if (err instanceof BudgetExceededError) return { ...base, status: 'budget_exceeded' };
-    if (err instanceof LlmError) {
-      llmCalls.push({
-        purpose: 'illustrate',
-        provider: deps.llmVision.provider,
-        model: deps.llmVision.model,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: null,
-        durationMs: 0,
-        status: 'error',
-      });
-      return { ...base, status: 'llm_failed' };
-    }
-    throw err;
-  }
-
-  const coverIndex = Number(parsed?.cover?.index ?? parsed?.index);
-  const inRange = Number.isInteger(coverIndex) && coverIndex >= 0 && coverIndex < candidates.length;
-  // Tolera o formato antigo/achatado (sem qualityOk): trata como aprovado.
-  const qualityOk = parsed?.cover?.qualityOk !== false;
-  const validCover = inRange && qualityOk;
-  if (inRange && !qualityOk) log('ilustração: capa candidata reprovada na revisão de qualidade');
-  const cover: ChosenImage | null = validCover
-    ? {
-        ...candidates[coverIndex]!,
-        alt: String(parsed?.cover?.alt ?? parsed?.alt ?? '').trim() || input.topic,
+  for (const slot of slots) {
+    let chosen: ChosenImage | null = null;
+    try {
+      chosen = await fillSlot(slot, input, deps, { sourcePool, used, maxCandidates, llmCalls, notes, log });
+    } catch (err) {
+      if (err instanceof BudgetExceededError) {
+        result.status = 'budget_exceeded';
+        notes.push(`${slot.id}: orçamento de tokens esgotado`);
+        break;
       }
-    : null;
-
-  const inlineRaw =
-    parsed && Array.isArray(parsed.inline) ? parsed.inline : parsed && Array.isArray(parsed.images) ? parsed.images : [];
-  const used = new Set<number>(validCover ? [coverIndex] : []);
-  const inline: ChosenImage[] = [];
-  for (const item of inlineRaw) {
-    if (inline.length >= inlineCount) break;
-    const idx = Number(item?.index);
-    if (!Number.isInteger(idx) || idx < 0 || idx >= candidates.length || used.has(idx)) continue;
-    used.add(idx);
-    inline.push({ ...candidates[idx]!, alt: String(item?.alt ?? '').trim() || input.topic });
+      throw err;
+    }
+    if (!chosen) continue;
+    if (slot.role === 'cover') result.cover = chosen;
+    else result.inline.push(chosen);
   }
 
-  if (!cover) {
-    const generated = await generateFallbackCover(input, deps, log);
-    if (generated) {
-      log(`ilustração: nenhuma candidata aprovada — capa gerada com IA, ${inline.length} imagem(ns) no corpo`);
-      return { ...base, status: 'ok', cover: generated, coverGenerated: true, inline };
-    }
-    if (inline.length === 0) {
-      log('ilustração: nenhuma imagem relevante — post sem imagem');
-      return { ...base, status: 'none_relevant' };
-    }
+  result.coverMissing = result.cover === null;
+  if (result.coverMissing) {
+    log('ilustração: NENHUMA capa disponível. O post não deve ser publicado sem capa.');
+    if (result.inline.length === 0 && result.status === 'ok') result.status = 'no_images';
   }
-  log(
-    `ilustração: capa ${cover ? `${coverIndex} (${cover.license})` : 'nenhuma'}, ${inline.length} imagem(ns) no corpo`,
-  );
-  return { ...base, status: 'ok', cover, inline };
+  return result;
 }
 
-/**
- * Último recurso: gera a capa com IA (OpenAI) quando nada da web/acervo
- * serviu. Falha na geração nunca derruba o pipeline — cai no comportamento
- * de sempre (post sem capa).
- */
-async function generateFallbackCover(
+interface SlotCtx {
+  sourcePool: ImageCandidate[];
+  used: Set<string>;
+  maxCandidates: number;
+  llmCalls: LlmCallRecord[];
+  notes: string[];
+  log: (msg: string) => void;
+}
+
+async function fillSlot(
+  slot: ImageSlot,
   input: IllustrateInput,
   deps: IllustrateDeps,
-  log: (msg: string) => void,
+  ctx: SlotCtx,
 ): Promise<ChosenImage | null> {
-  if (!deps.imageGen) return null;
-  const prompt = `Editorial illustration for a blog article about "${input.topic}"${
-    input.keywords.length ? ` (${input.keywords.slice(0, 3).join(', ')})` : ''
-  }. Photorealistic, clean composition, no text, no watermark, no logos.`;
-  log('ilustração: gerando capa com IA (nenhuma candidata aprovada)');
-  let generated;
+  const { log, notes } = ctx;
+  log(`ilustração [${slot.id}] busca: ${slot.query}`);
+
+  let searched: ImageCandidate[] = [];
   try {
-    generated = await deps.imageGen.generate(prompt);
-  } catch (err) {
-    const reason = err instanceof ImageGenerationError || err instanceof Error ? err.message : String(err);
-    log(`ilustração: geração de capa com IA falhou: ${reason}`);
-    return null;
+    searched = await deps.images.search(slot.query, { limit: Math.max(ctx.maxCandidates * 3, 12) });
+  } catch {
+    searched = [];
   }
-  if (!generated) {
-    log('ilustração: geração de capa com IA falhou');
-    return null;
+
+  // Fontes oficiais primeiro (até 3), depois o resto pré-ranqueado. Sem repetir imagem entre slots.
+  const fresh = (list: ImageCandidate[]) => list.filter((c) => !ctx.used.has(c.url));
+  const official = fresh(ctx.sourcePool).slice(0, 3);
+  const rest = rankCandidates(
+    fresh(searched).filter((c) => !official.some((o) => o.url === c.url)),
+    { topic: slot.description, keywords: input.keywords },
+    ctx.maxCandidates * 2,
+  );
+  const pool = [...official, ...rest];
+
+  // Baixa e mede ANTES de mostrar à visão: candidata que o servidor nem entrega
+  // (anti-hotlink, 403, pequena demais) sai aqui e não derruba a chamada inteira.
+  const prepared = (await Promise.all(pool.map((c) => deps.prepare(c, slot).catch(() => null))))
+    .filter((p): p is PreparedImage => p !== null)
+    .slice(0, ctx.maxCandidates);
+  log(`ilustração [${slot.id}]: ${prepared.length} de ${pool.length} candidata(s) utilizáveis`);
+
+  if (prepared.length > 0) {
+    await deps.checkBudget?.();
+    const pick = await askVision(slot, input, deps, prepared, ctx);
+    if (pick) {
+      const p = prepared[pick.index]!;
+      ctx.used.add(p.candidate.url);
+      const origin = p.candidate.provider === 'source-page' ? 'source' : 'search';
+      notes.push(`${slot.id}: ${origin === 'source' ? 'imagem da fonte' : 'imagem da busca'} (${p.candidate.provider})`);
+      log(`ilustração [${slot.id}]: escolhida da ${origin === 'source' ? 'fonte' : 'busca'} (${p.candidate.provider})`);
+      return {
+        slot,
+        origin,
+        alt: pick.alt || input.topic,
+        caption: p.candidate.attribution,
+        license: p.candidate.license,
+        sourcePage: p.candidate.sourcePage,
+        original: p.original,
+      };
+    }
+  } else {
+    notes.push(`${slot.id}: nenhuma candidata utilizável`);
   }
-  return {
-    url: 'generated:openai',
-    thumbnail: 'generated:openai',
-    title: input.topic,
-    license: 'generated',
-    attribution: '',
-    sourcePage: '',
-    provider: 'openai-generated',
-    alt: input.topic,
-    inlineData: generated,
+
+  return generateForSlot(slot, input, deps, ctx);
+}
+
+async function askVision(
+  slot: ImageSlot,
+  input: IllustrateInput,
+  deps: IllustrateDeps,
+  prepared: PreparedImage[],
+  ctx: SlotCtx,
+): Promise<{ index: number; alt: string } | null> {
+  const attempt = async (subset: PreparedImage[]): Promise<{ index: number; alt: string } | 'rejected' | 'failed'> => {
+    try {
+      const res = await deps.llmVision.complete({
+        prompt: buildVisionPrompt(slot, input.topic, subset, input.language),
+        images: subset.map((p) => p.thumbnail),
+        schema: buildSchema(),
+        schemaName: 'autopilot_illustrate',
+        maxTokens: input.imageMaxTokens ?? 3_000,
+        temperature: 0,
+      });
+      ctx.llmCalls.push({
+        purpose: 'illustrate',
+        provider: res.provider,
+        model: res.model,
+        inputTokens: res.inputTokens,
+        outputTokens: res.outputTokens,
+        costUsd: res.costUsd,
+        durationMs: res.durationMs,
+        status: res.truncated ? 'truncated' : 'ok',
+      });
+      const parsed = extractJson(res.text) as VisionPick | null;
+      const index = Number(parsed?.index);
+      const inRange = Number.isInteger(index) && index >= 0 && index < subset.length;
+      const good = inRange && parsed?.qualityOk !== false && parsed?.fits !== false;
+      if (!good) {
+        const why = String(parsed?.reason ?? '').trim();
+        ctx.log(`ilustração [${slot.id}]: nenhuma candidata aprovada pela visão${why ? ` (${why})` : ''}`);
+        return 'rejected';
+      }
+      // o índice é do subconjunto mostrado; devolvemos relativo ao conjunto completo
+      return { index: prepared.indexOf(subset[index]!), alt: String(parsed?.alt ?? '').trim() };
+    } catch (err) {
+      if (err instanceof BudgetExceededError) throw err;
+      if (err instanceof LlmError) {
+        ctx.llmCalls.push({
+          purpose: 'illustrate',
+          provider: deps.llmVision.provider,
+          model: deps.llmVision.model,
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: null,
+          durationMs: 0,
+          status: 'error',
+        });
+        // O motivo vai para o log. Antes só aparecia "llm_failed", e não dava
+        // para saber se era chave, modelo, limite ou imagem.
+        ctx.log(`ilustração [${slot.id}]: visão falhou: ${err.message}`);
+        return 'failed';
+      }
+      throw err;
+    }
   };
+
+  const first = await attempt(prepared);
+  if (first !== 'failed' && first !== 'rejected') return first;
+  if (first === 'rejected') return null;
+
+  // Falha de chamada (não de julgamento): uma nova tentativa com menos imagens.
+  // Menos anexos é menos chance de o provedor recusar a requisição por tamanho.
+  if (prepared.length > 3) {
+    ctx.log(`ilustração [${slot.id}]: nova tentativa com ${3} imagens`);
+    const second = await attempt(prepared.slice(0, 3));
+    if (second !== 'failed' && second !== 'rejected') return second;
+  }
+  return null;
+}
+
+async function generateForSlot(
+  slot: ImageSlot,
+  input: IllustrateInput,
+  deps: IllustrateDeps,
+  ctx: SlotCtx,
+): Promise<ChosenImage | null> {
+  const { log, notes } = ctx;
+  if (!deps.imageGen) {
+    notes.push(`${slot.id}: sem imagem (nenhuma serviu e não há gerador de imagem configurado)`);
+    log(`ilustração [${slot.id}]: sem imagem, e nenhum gerador de imagem configurado`);
+    return null;
+  }
+
+  log(`ilustração [${slot.id}]: gerando com IA (${slot.size.width}x${slot.size.height})`);
+  try {
+    const generated = await deps.imageGen.generate(buildGenerationPrompt(slot, input.topic), { size: slot.size });
+    if (!generated) throw new ImageGenerationError('o gerador não devolveu imagem');
+    notes.push(`${slot.id}: gerada por IA`);
+    return {
+      slot,
+      origin: 'generated',
+      alt: slot.heading ? `${slot.heading}` : input.topic,
+      caption: '',
+      license: 'generated',
+      sourcePage: '',
+      // largura/altura reais são lidas no processamento; aqui só o tamanho pedido
+      original: { data: generated.data, mimeType: generated.mimeType, width: slot.size.width, height: slot.size.height },
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    notes.push(`${slot.id}: geração por IA falhou (${reason})`);
+    log(`ilustração [${slot.id}]: geração por IA falhou: ${reason}`);
+    return null;
+  }
 }

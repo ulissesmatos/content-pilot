@@ -17,6 +17,21 @@ function isGpt5Model(model: string): boolean {
   return /^gpt-5(?:[.-]|$)/i.test(model);
 }
 
+const DATA_URL = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i;
+
+/**
+ * Imagem para a Anthropic. URL comum vai como `url` e o servidor DELES baixa;
+ * data URL vai como base64. Preferimos base64 sempre que possível (ver
+ * illustrate): um único site com anti-hotlink entre as candidatas derrubava a
+ * requisição inteira com 400, e o post saía sem imagem sem ninguém saber por quê.
+ */
+function anthropicImageBlock(url: string) {
+  const m = DATA_URL.exec(url);
+  return m
+    ? { type: 'image', source: { type: 'base64', media_type: m[1]!.toLowerCase(), data: m[2]! } }
+    : { type: 'image', source: { type: 'url', url } };
+}
+
 export function buildLlmRequest(
   cfg: LlmProviderConfig,
   prompt: string,
@@ -32,7 +47,7 @@ export function buildLlmRequest(
   const anthropicContent = images.length
     ? [
         { type: 'text', text: prompt },
-        ...images.map((url) => ({ type: 'image', source: { type: 'url', url } })),
+        ...images.map(anthropicImageBlock),
       ]
     : prompt;
   const openaiContent = images.length

@@ -276,6 +276,46 @@ estrutural em vez de lembrete.
 Gravações fora desse caminho (scripts, SQL manual) continuam precisando de
 `bumpConfigVersion` — ou de reiniciar web e worker.
 
+## Imagens do artigo
+
+Cada imagem (capa e corpo) é um **slot** com busca própria, escolha pela visão e,
+se nada serve, geração por IA. O que sai vai para o WordPress em **WebP**, no
+tamanho configurado.
+
+**Por slot, na ordem:**
+
+1. Busca com a consulta do slot: assunto do artigo + a seção onde a imagem cai.
+2. Imagem de destaque (`og:image`) das **fontes** que embasam o artigo, quando o
+   template deixa (`images.sourceImages`). Vem com legenda de crédito.
+3. O worker **baixa e mede** cada candidata antes da visão. Sai o que falhou,
+   é banner, ícone ou tem resolução baixa (capa: 600px, corpo: 400px).
+4. A visão escolhe entre miniaturas em base64, com o contexto do slot.
+5. Se nenhuma serve, ou a visão falhou, **gera por IA** no tamanho do slot.
+
+**Por que as miniaturas vão em base64.** Antes as URLs iam direto ao provedor de
+IA, e era o servidor dele que baixava. Um único site com anti-hotlink entre as
+candidatas derrubava a chamada inteira com HTTP 400, e o log só dizia
+`llm_failed`. Agora quem baixa é o worker (que só acessa HTTPS público), e o log
+traz o motivo real.
+
+**Tamanhos.** `images.cover` e `images.inline` no template (padrão 1280x720).
+Imagem gerada por IA é recortada no tamanho exato; a API só oferece
+1536x1024, 1024x1024 e 1024x1536 (gpt-image) ou 1792x1024 (dall-e-3). Capa real
+é recortada com foco no assunto. Imagem real do corpo só é reduzida, nunca
+esticada nem recortada. `images.format: "original"` desliga a conversão.
+
+**Capa obrigatória.** Se nenhum meio produzir capa, o post **nunca** é
+publicado, nem em modo automático: é criado como rascunho, com o motivo no log.
+A geração por IA (`/credentials`, "Geração de imagem") é o que garante capa
+quando a busca falha, e o painel avisa quando ela não está ativa.
+
+**Onde fica o relatório.** `briefs.image_report` guarda de onde veio cada imagem
+e se faltou capa (o HTML não diz se uma imagem foi gerada por IA).
+
+**Licença.** Imagens da web e das fontes têm licença do veículo, não sua. A
+legenda de crédito ("Imagem: ign.com") é gravada, mas revise antes de publicar
+o que for sensível. Imagens geradas por IA não têm esse problema.
+
 ## Migrações desta versão
 
 `0009_email_auth.sql` cria `auth_tokens` (links de troca de senha e confirmação,

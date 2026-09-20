@@ -44,6 +44,7 @@ export interface ReadinessIssue {
     | 'model-not-in-catalog'
     | 'model-without-vision'
     | 'catalog-empty'
+    | 'no-image-generator'
     | 'no-site';
   message: string;
   fix: { label: string; href: string };
@@ -235,6 +236,19 @@ export async function getWorkspaceReadiness(
       message: 'A busca de fontes usa o Tavily, e não há chave cadastrada.',
       fix: { label: 'Cadastrar credencial', href: '/credentials' },
       blocking: true,
+    });
+  }
+
+  // A capa é obrigatória, e a geração por IA é o que garante uma quando a busca
+  // não acha nenhuma boa. Sem ela o produto funciona, mas o post pode sair sem
+  // capa (e, nesse caso, nunca é publicado sozinho). Por isso é aviso, não bloqueio.
+  if (!override?.imageGenModel || !available.has('openai')) {
+    issues.push({
+      code: 'no-image-generator',
+      message:
+        'A geração de imagem por IA não está ativa. Se a busca não achar uma boa capa, o post fica sem capa e é criado como rascunho.',
+      fix: { label: 'Ativar geração de imagem', href: '/credentials' },
+      blocking: false,
     });
   }
 

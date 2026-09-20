@@ -353,7 +353,7 @@ export const gameCodesTemplate = {
     // SEO estruturado, links externos e imagens ficam desligados para não alterá-lo.
     seo: { metaDescription: false, chooseCategory: false },
     externalLinks: { enabled: false, min: 2, max: 4 },
-    images: { enabled: false, candidates: 5, inlineMax: 0, webSearch: true },
+    images: { enabled: false, candidates: 5, inlineMax: 0, webSearch: true, sourceImages: true, cover: { width: 1280, height: 720 }, inline: { width: 1280, height: 720 }, format: 'webp', quality: 82 },
     validation: { titleMin: 10, titleMax: 120, htmlMinChars: 200 },
     llmDefaults: { generateMaxTokens: 16_000, generateTemperature: 0.2, verifyMaxTokens: 8_000, verifyTemperature: 0 },
   } satisfies TemplateConfig,

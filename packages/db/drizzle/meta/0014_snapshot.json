@@ -1,6 +1,6 @@
 {
-  "id": "a67223cb-6191-4c8e-b926-f6a0b9b449ec",
-  "prevId": "de1ab1f4-acf8-428a-95ba-6471259b827f",
+  "id": "1171a015-bd02-4cfb-a977-d51d40c8db8a",
+  "prevId": "a67223cb-6191-4c8e-b926-f6a0b9b449ec",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -848,6 +848,12 @@
         },
         "llm_config": {
           "name": "llm_config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image_report": {
+          "name": "image_report",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

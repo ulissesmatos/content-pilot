@@ -13,6 +13,7 @@ import {
 } from '@content-pilot/db';
 import {
   credentialVaultScope,
+  normalizeProviderModel,
   fetchAnthropicModels,
   fetchOpenAiModels,
   fetchOpenRouterModels,
@@ -208,7 +209,8 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
       .limit(1);
     if (!cred) throw new Error('Credencial indisponível para este workspace/provedor.');
     if (cred.type !== task.provider) throw new Error('Credencial indisponível para este workspace/provedor.');
-    return { provider: task.provider, model: task.model, apiKey: decryptApiKey(cred) };
+    const fixed = normalizeProviderModel(task.provider, task.model);
+    return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
   }
 
   let provider = task.provider;
@@ -243,7 +245,12 @@ async function resolveLlmCredential(db: Db, workspaceId: string, task: LlmTaskCo
     throw new Error('Credencial indisponível para este workspace/provedor.');
   }
   if (!cred) throw new Error(`Nenhuma credencial ${task.provider} disponível — cadastre sua própria chave em /credentials.`);
-  return { provider, model, apiKey: decryptApiKey(cred) };
+  // Última defesa: uma linha antiga com "openai/gpt-4o-mini" em provider
+  // openai bateria HTTP 400 no provedor. O reparo do seed limpa o banco no
+  // deploy, mas isto faz a execução funcionar mesmo antes disso — e protege
+  // de qualquer caminho de escrita que venha a esquecer a normalização.
+  const fixed = normalizeProviderModel(provider, model);
+  return { provider: fixed.provider, model: fixed.modelId, apiKey: decryptApiKey(cred) };
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   upsertWorkspaceAiSettings,
 } from '@content-pilot/db';
 import {
+  checkProviderModel,
   fetchAnthropicModels,
   fetchOpenAiImageModels,
   fetchOpenAiModels,
@@ -103,15 +104,25 @@ const saveAiSettingsSchema = z
 /** Provedor/modelo ativo para texto e visão. null/null volta ao padrão do admin. */
 export async function saveAiSettingsAction(input: unknown): Promise<ActionResult<null>> {
   return runAuthedAction(saveAiSettingsSchema, input, async (data, { workspaceId }) => {
+    let model = data.model;
     if (data.provider) {
       const cred = await ownCredential(workspaceId, data.provider);
       if (!cred) throw new UserFacingError('Cadastre a credencial deste provedor antes de ativá-lo.');
+      // Mesmo tratamento do perfil do admin: prefixo que repete o provedor
+      // sai fora; id de outro fornecedor não tem equivalente nativo.
+      const check = checkProviderModel(data.provider, data.model ?? '');
+      if (check.fix === 'foreign-vendor') {
+        throw new UserFacingError(
+          `"${data.model}" é um modelo da ${check.vendor} no formato do OpenRouter. Escolha um modelo do provedor selecionado ou troque para OpenRouter.`,
+        );
+      }
+      model = check.modelId;
     }
     const db = getTenantDb(workspaceId);
     const current = await getWorkspaceAiSettings(db, workspaceId);
     await upsertWorkspaceAiSettings(db, workspaceId, {
       provider: data.provider,
-      model: data.model,
+      model,
       imageGenModel: current?.imageGenModel ?? null,
     });
     revalidatePath('/credentials');

@@ -3,7 +3,9 @@
 # Diferenças para o docker-compose.prod.yml:
 #  - sem Caddy e sem portas publicadas: o proxy do próprio Coolify termina o
 #    TLS e roteia. Subir o Caddy aqui brigaria pelas portas 80/443 do host.
-#  - `expose: 3000` é o que faz o Coolify oferecer o campo de domínio do `web`.
+#  - o domínio é definido na UI, no campo Domains do serviço `web`, COM a porta
+#    interna: `https://pilot.seudominio.com:3000`. A porta não aparece na URL
+#    pública — só diz ao proxy para qual porta do container rotear.
 #  - as variáveis vêm do editor de ambiente do Coolify, não de um .env no disco.
 #
 # Nenhum `${VAR:?...}` de propósito: o Coolify lê este arquivo antes de existir

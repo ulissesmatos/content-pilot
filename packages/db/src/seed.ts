@@ -2,9 +2,22 @@ import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { hash } from 'bcryptjs';
 import { and, eq, inArray, isNull, like } from 'drizzle-orm';
-import { gameCodesTemplate, genericArticleTemplate, parseTemplateConfig } from '@content-pilot/core';
+import {
+  checkProviderModel,
+  gameCodesTemplate,
+  genericArticleTemplate,
+  parseTemplateConfig,
+} from '@content-pilot/core';
 import { createDb } from './client';
-import { contentTemplates, modelProfileEntries, modelProfiles, users, workspaces } from './schema';
+import {
+  contentTemplates,
+  credentials,
+  modelProfileEntries,
+  modelProfiles,
+  users,
+  workspaceAiSettings,
+  workspaces,
+} from './schema';
 
 config({ path: resolve(import.meta.dirname, '../../../.env') });
 
@@ -193,32 +206,109 @@ async function main() {
     }
   }
 
-  // Repara entrada de perfil com id no formato do OpenRouter ("vendor/modelo",
-  // ex.: "openai/gpt-5.4-nano") salva num provedor nativo (openai/anthropic).
-  // A API nativa rejeita esse formato com HTTP 400 em runtime — e isso
-  // aconteceu de verdade num perfil de produção antes de existir a validação
-  // em setProfileEntryAction. O modelo pretendido já está certo nesse
-  // formato; só o provedor está errado, então a correção é trocar para
-  // openrouter mantendo o mesmo modelId — nunca inventar um id nativo.
-  const badEntries = await db
+  // Repara entrada de perfil com id no formato do OpenRouter ("fornecedor/modelo")
+  // salva num provedor nativo, que responde HTTP 400 só na execução. Aconteceu
+  // em produção: os perfis semeados usam ids do OpenRouter, e trocar apenas o
+  // provedor da etapa no painel deixa o id antigo para trás.
+  //
+  // A correção depende de QUAL fornecedor está no prefixo — ver
+  // checkProviderModel. Prefixo que repete o provedor é só ruído e sai fora,
+  // mantendo a credencial que o operador cadastrou. Prefixo de outro
+  // fornecedor não tem equivalente nativo, e aí a única leitura coerente é
+  // roteamento por OpenRouter.
+  const withSlash = await db
     .select({
       id: modelProfileEntries.id,
-      profileId: modelProfileEntries.profileId,
       purpose: modelProfileEntries.purpose,
       provider: modelProfileEntries.provider,
       modelId: modelProfileEntries.modelId,
+      slug: modelProfiles.slug,
     })
     .from(modelProfileEntries)
+    .innerJoin(modelProfiles, eq(modelProfiles.id, modelProfileEntries.profileId))
     .where(
       and(inArray(modelProfileEntries.provider, ['openai', 'anthropic']), like(modelProfileEntries.modelId, '%/%')),
     );
-  for (const entry of badEntries) {
+  for (const entry of withSlash) {
+    const check = checkProviderModel(entry.provider, entry.modelId);
+    if (check.fix === 'stripped-prefix') {
+      await db
+        .update(modelProfileEntries)
+        .set({ modelId: check.modelId, updatedAt: new Date() })
+        .where(eq(modelProfileEntries.id, entry.id));
+      console.log(
+        `Perfil "${entry.slug}" corrigido: "${entry.purpose}" — modelo "${entry.modelId}" → "${check.modelId}" (prefixo repetia o provedor ${entry.provider}; credencial mantida)`,
+      );
+    } else if (check.fix === 'foreign-vendor') {
+      await db
+        .update(modelProfileEntries)
+        .set({ provider: 'openrouter', updatedAt: new Date() })
+        .where(eq(modelProfileEntries.id, entry.id));
+      console.log(
+        `Perfil "${entry.slug}" corrigido: "${entry.purpose}" — provider "${entry.provider}" → "openrouter" (modelo "${entry.modelId}" é do fornecedor ${check.vendor}; exige credencial OpenRouter)`,
+      );
+    }
+  }
+
+  // Desfaz o reparo anterior, que trocava o provedor para openrouter em vez de
+  // remover o prefixo. Ele já rodou em produção e deixou linhas apontando para
+  // uma chave OpenRouter que a instalação pode não ter.
+  //
+  // A condição é estrita de propósito: só age quando a configuração atual é
+  // comprovadamente inutilizável (não existe chave OpenRouter da plataforma) e
+  // a alternativa existe (há chave do fornecedor que está no prefixo). Quem
+  // usa OpenRouter de verdade não é tocado.
+  const platformKeys = await db
+    .select({ type: credentials.type })
+    .from(credentials)
+    .where(isNull(credentials.workspaceId));
+  const havePlatform = new Set(platformKeys.map((c) => c.type));
+  if (!havePlatform.has('openrouter')) {
+    const routed = await db
+      .select({
+        id: modelProfileEntries.id,
+        purpose: modelProfileEntries.purpose,
+        modelId: modelProfileEntries.modelId,
+        slug: modelProfiles.slug,
+      })
+      .from(modelProfileEntries)
+      .innerJoin(modelProfiles, eq(modelProfiles.id, modelProfileEntries.profileId))
+      .where(eq(modelProfileEntries.provider, 'openrouter'));
+    for (const entry of routed) {
+      const vendor = entry.modelId.slice(0, entry.modelId.indexOf('/')).trim().toLowerCase();
+      if (vendor !== 'openai' && vendor !== 'anthropic') continue;
+      if (!havePlatform.has(vendor)) continue;
+      const check = checkProviderModel(vendor, entry.modelId);
+      if (check.fix !== 'stripped-prefix') continue;
+      await db
+        .update(modelProfileEntries)
+        .set({ provider: vendor, modelId: check.modelId, updatedAt: new Date() })
+        .where(eq(modelProfileEntries.id, entry.id));
+      console.log(
+        `Perfil "${entry.slug}" ajustado: "${entry.purpose}" — "openrouter:${entry.modelId}" → "${vendor}:${check.modelId}" (sem chave OpenRouter da plataforma; existe chave ${vendor})`,
+      );
+    }
+  }
+
+  // Mesmo defeito na escolha de modelo do cliente BYOK (/credentials).
+  const aiSettings = await db
+    .select({
+      workspaceId: workspaceAiSettings.workspaceId,
+      provider: workspaceAiSettings.provider,
+      model: workspaceAiSettings.model,
+    })
+    .from(workspaceAiSettings)
+    .where(like(workspaceAiSettings.model, '%/%'));
+  for (const row of aiSettings) {
+    if (!row.provider || !row.model) continue;
+    const check = checkProviderModel(row.provider, row.model);
+    if (check.fix !== 'stripped-prefix') continue;
     await db
-      .update(modelProfileEntries)
-      .set({ provider: 'openrouter', updatedAt: new Date() })
-      .where(eq(modelProfileEntries.id, entry.id));
+      .update(workspaceAiSettings)
+      .set({ model: check.modelId, updatedAt: new Date() })
+      .where(eq(workspaceAiSettings.workspaceId, row.workspaceId));
     console.log(
-      `Perfil de modelo corrigido: purpose "${entry.purpose}" — provider "${entry.provider}" → "openrouter" (modelo "${entry.modelId}" mantido; exigia credencial OpenRouter, não ${entry.provider})`,
+      `Preferência de IA corrigida: workspace ${row.workspaceId} — modelo "${row.model}" → "${check.modelId}"`,
     );
   }
 

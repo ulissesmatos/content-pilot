@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { modelCatalog, modelProfileEntries, modelProfiles } from '@content-pilot/db';
-import { LLM_PURPOSES, VISION_PURPOSES } from '@content-pilot/core';
+import { checkProviderModel, LLM_PURPOSES, VISION_PURPOSES } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAdminAction } from '@/lib/admin-action';
 import { UserFacingError } from '@/lib/errors';
@@ -37,6 +37,18 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
         .limit(1);
       if (!profile) throw new UserFacingError('Perfil não encontrado.');
 
+      // Corrige "openai/gpt-4o-mini" salvo com provider openai: o prefixo só
+      // repete o provedor e a API nativa devolve 400. Feito ANTES da consulta
+      // ao catálogo, senão a checagem de visão procuraria um id que não existe
+      // lá e recusaria um modelo perfeitamente válido.
+      const check = checkProviderModel(data.provider, data.modelId);
+      if (check.fix === 'foreign-vendor') {
+        throw new UserFacingError(
+          `"${data.modelId}" é um id do OpenRouter para modelos da ${check.vendor}, e ${data.provider === 'openai' ? 'a OpenAI' : 'a Anthropic'} não atende esse modelo. Escolha um modelo nativo do provedor ou troque esta etapa para OpenRouter.`,
+        );
+      }
+      const modelId = check.modelId;
+
       const [catalogEntry] = await tx
         .select({
           supportsVision: modelCatalog.supportsVision,
@@ -44,7 +56,7 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
         })
         .from(modelCatalog)
         .where(
-          and(eq(modelCatalog.provider, data.provider), eq(modelCatalog.modelId, data.modelId)),
+          and(eq(modelCatalog.provider, data.provider), eq(modelCatalog.modelId, modelId)),
         )
         .limit(1);
 
@@ -59,15 +71,6 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
             `"${catalogEntry.displayName}" não aceita imagem. Sem visão, a escolha da capa falha em silêncio e todo post sai sem imagem.`,
           );
         }
-      }
-
-      // "openai/gpt-5.4-nano" é id do OpenRouter (vendor/modelo); a API nativa
-      // da OpenAI/Anthropic só aceita o id nu ("gpt-5.4-nano") e devolve 400
-      // em runtime — melhor recusar aqui do que descobrir isso num job falho.
-      if (data.provider !== 'openrouter' && data.modelId.includes('/')) {
-        throw new UserFacingError(
-          `"${data.modelId}" parece um id do OpenRouter (formato vendor/modelo). Para ${data.provider === 'openai' ? 'OpenAI' : 'Anthropic'} direto, use o id nativo sem o prefixo — ou troque o provedor desta etapa para OpenRouter.`,
-        );
       }
 
       const [before] = await tx
@@ -87,14 +90,14 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
           profileId: profile.id,
           purpose: data.purpose,
           provider: data.provider,
-          modelId: data.modelId,
+          modelId,
           maxTokens: data.maxTokens ?? null,
         })
         .onConflictDoUpdate({
           target: [modelProfileEntries.profileId, modelProfileEntries.purpose],
           set: {
             provider: data.provider,
-            modelId: data.modelId,
+            modelId,
             maxTokens: data.maxTokens ?? null,
             updatedAt: new Date(),
           },
@@ -106,7 +109,8 @@ export async function setProfileEntryAction(input: unknown): Promise<ActionResul
           profile: profile.slug,
           purpose: data.purpose,
           before: before ?? null,
-          after: { provider: data.provider, modelId: data.modelId },
+          after: { provider: data.provider, modelId },
+          ...(check.fix === 'stripped-prefix' ? { normalized: { from: data.modelId, to: modelId } } : {}),
         },
       });
 

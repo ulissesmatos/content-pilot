@@ -5,6 +5,7 @@ export * from './settings/schemas';
 export * from './settings/redact';
 export * from './llm/purposes';
 export * from './llm/catalog';
+export * from './llm/model-id';
 export * from './llm/cost-model';
 export * from './cms/types';
 export * from './cms/wordpress';

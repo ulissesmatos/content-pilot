@@ -11,7 +11,7 @@
 4. **Variáveis**: crie `/opt/content-pilot/.env`:
    ```bash
    DOMAIN=pilot.seudominio.com
-   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+   POSTGRES_PASSWORD=$(openssl rand -hex 24)
    AUTH_SECRET=$(openssl rand -base64 32)
    ADMIN_EMAIL=voce@exemplo.com
    ADMIN_PASSWORD=uma-senha-forte
@@ -65,14 +65,14 @@ Na aba **Environment Variables** do recurso. Gere os segredos na sua máquina e
 guarde-os num gerenciador de senhas antes de colar:
 
 ```bash
-openssl rand -base64 24   # POSTGRES_PASSWORD
+openssl rand -hex 24      # POSTGRES_PASSWORD (hex, nunca base64 — veja abaixo)
 openssl rand -base64 32   # AUTH_SECRET
 openssl rand -base64 32   # material da VAULT_MASTER_KEYS (prefixe com "k1:")
 ```
 
 | Variável | Valor | Obrigatória |
 |---|---|---|
-| `POSTGRES_PASSWORD` | senha gerada | sim |
+| `POSTGRES_PASSWORD` | senha gerada com `openssl rand -hex 24` | sim |
 | `AUTH_SECRET` | segredo gerado | sim |
 | `AUTH_URL` | `https://pilot.seudominio.com` — https, sem barra final | sim |
 | `ADMIN_EMAIL` | o seu e-mail; define quem é o super admin e a única conta com acesso às chaves do sistema | sim |
@@ -85,6 +85,11 @@ openssl rand -base64 32   # material da VAULT_MASTER_KEYS (prefixe com "k1:")
 | `WORKER_CONCURRENCY` | `2` | não (padrão `2`) |
 | `POSTGRES_USER` / `POSTGRES_DB` | `contentpilot` | não |
 
+⚠️ **`POSTGRES_PASSWORD` em hexadecimal, não base64.** O compose monta o
+`DATABASE_URL` com a senha crua; uma `/` (comum em base64, ~40% das senhas de 24
+bytes) vira `Invalid URL` e o `migrate` falha sem apontar a senha como causa.
+Evite também `@`, `#`, `?`, `:` e espaços se for escolher a senha à mão.
+
 ⚠️ `VAULT_MASTER_KEYS` precisa decodificar para **exatamente 32 bytes**, e
 perdê-la torna todas as credenciais salvas indecifráveis. Guarde fora do
 servidor. `ADMIN_EMAIL` é lido pelo worker a cada tarefa: trocá-lo transfere o
@@ -93,11 +98,14 @@ acesso às chaves do sistema e exige um workspace com uma única conta ativa.
 ### 4. Domínio
 
 Nas configurações do serviço **`web`**, campo **Domains**, informe
-`https://pilot.seudominio.com`. É o único serviço que recebe domínio —
-`postgres`, `worker` e `migrate` ficam sem exposição pública.
+`https://pilot.seudominio.com:3000`. **A porta `:3000` é obrigatória**: é a porta
+interna do container, e é ela que diz ao proxy para onde rotear. Ela não aparece
+na URL pública — o acesso continua em `https://pilot.seudominio.com`. É o único
+serviço que recebe domínio; `postgres`, `worker` e `migrate` ficam sem exposição.
 
-O valor precisa ser idêntico ao `AUTH_URL`. Divergência (http vs https, `www`,
-barra final) derruba o login com redirecionamento em loop.
+O `AUTH_URL` é a mesma URL **sem a porta** (`https://pilot.seudominio.com`).
+Divergência entre ele e o domínio público (http vs https, `www`, barra final)
+derruba o login com redirecionamento em loop.
 
 Se preferir o domínio gerado pelo Coolify, declare `SERVICE_FQDN_WEB_3000` no
 ambiente e use `AUTH_URL=${SERVICE_URL_WEB_3000}` — `SERVICE_URL_*` traz o
@@ -108,9 +116,13 @@ esquema, `SERVICE_FQDN_*` só o hostname.
 **Deploy**. A ordem é `postgres` (healthy) → `migrate` → `web` + `worker`.
 
 O container `migrate` aplica as migrations e o seed e **sai com código 0**:
-vê-lo como `exited` na lista é o comportamento correto, não uma falha. Se o
-Coolify marcar o deploy como não saudável por causa dele, desative o health
-check daquele container — `web` e `worker` é que precisam ficar de pé.
+vê-lo como `exited` na lista é o comportamento correto, não uma falha.
+
+Se o Coolify marcar o recurso como não saudável por causa dele, adicione
+`exclude_from_hc: true` ao serviço `migrate` no compose. É uma chave do próprio
+Coolify (documentada para containers de execução única), então o `docker compose`
+puro a rejeita — por isso ela não vem no arquivo do repositório. Aplique só se o
+sintoma aparecer.
 
 ### 6. Conferir
 
@@ -276,6 +288,41 @@ Os limites de `packages/core/src/billing/plans.ts` se dividem em dois grupos:
 - **Estrutural** (sites, autopilots): medem o que roda no nosso worker e valem para todos, BYOK ou não. Um autopilot ativo executa sozinho pelo scheduler, sem ninguém pedir; é o limite que protege o servidor. Somente o workspace da sua conta ativa (`ADMIN_EMAIL`) pode usar chaves do sistema. Isenção de cotas, cargo de admin ou plano pago não dão essa permissão. A identidade é revalidada no worker, inclusive nas automações. Se o workspace tiver mais de uma conta não excluída, o acesso global é bloqueado.
 
 Consulte o [relatório de lançamento](launch-review.md) para limitações, opções de hospedagem e validações ainda necessárias.
+
+## Id de modelo: formato do OpenRouter x nativo
+
+O OpenRouter endereça modelos como `fornecedor/modelo` ("openai/gpt-4o-mini").
+As APIs nativas da OpenAI e da Anthropic só aceitam o id nu ("gpt-4o-mini") e
+respondem **HTTP 400 apenas na execução** — o salvamento passa, o job falha.
+
+Os perfis semeados usam ids do OpenRouter, então trocar só o provedor da etapa
+em `/admin/ai/profiles` deixa o id antigo para trás. Foi assim que a falha
+apareceu em produção.
+
+`checkProviderModel` (em `packages/core/src/llm/model-id.ts`) separa dois casos
+que se escondem atrás da mesma barra:
+
+| Situação | O que é feito |
+|---|---|
+| `openai/gpt-4o-mini` com provedor **openai** — o prefixo só repete o provedor | Prefixo removido. A credencial escolhida é mantida. |
+| `anthropic/claude-x` com provedor **openai** — id de **outro** fornecedor | Não há correção segura: inventar um id nativo seria pior. O salvamento é recusado; numa linha já gravada, o provedor passa a openrouter. |
+| Qualquer id com provedor **openrouter** | Intocado — ali o prefixo é o endereço do modelo. |
+
+A regra vale em quatro pontos: no salvamento do perfil do admin, no salvamento
+da escolha BYOK em `/credentials`, no reparo do seed (todo deploy) e, como
+última defesa, na resolução do worker — assim a execução funciona mesmo antes
+de o banco ser limpo.
+
+**Reparo de instalações afetadas.** Uma versão anterior corrigia isso trocando o
+provedor para openrouter em vez de remover o prefixo, o que aponta a etapa para
+uma chave que a instalação pode não ter. O seed desfaz isso, mas só quando a
+configuração atual é comprovadamente inutilizável: não existe credencial
+OpenRouter da plataforma **e** existe credencial do fornecedor que está no
+prefixo. Quem usa OpenRouter de verdade não é tocado.
+
+Isso conserta as etapas cujo modelo é da OpenAI/Anthropic. Etapas apontando para
+modelos sem equivalente nativo (DeepSeek, Z-AI) continuam exigindo chave
+OpenRouter — troque o modelo em `/admin/ai/profiles` ou cadastre a chave.
 
 ## Migrações desta versão
 

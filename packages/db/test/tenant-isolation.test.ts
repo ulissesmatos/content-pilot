@@ -320,3 +320,45 @@ test('email tokens are single-use, expire, and never reach the tenant role', asy
 
   await db.delete(s.authTokens).where(eq(s.authTokens.userId, userId));
 });
+
+test('seed repairs OpenRouter-style model ids in the direction that keeps the operator key', async () => {
+  const { checkProviderModel } = await import('@content-pilot/core');
+  const profileId = randomUUID();
+  await db.insert(s.modelProfiles).values({ id: profileId, slug: `repair-${profileId}`, name: 'Reparo' });
+  await db.insert(s.modelProfileEntries).values([
+    // o caso real de producao: prefixo apenas repete o provedor escolhido
+    { profileId, purpose: 'generate', provider: 'openai', modelId: 'openai/gpt-4o-mini' },
+    // id de OUTRO fornecedor: nao existe equivalente nativo na OpenAI
+    { profileId, purpose: 'verify', provider: 'openai', modelId: 'anthropic/claude-sonnet-4.5' },
+    // ja correto: o reparo nao pode encostar
+    { profileId, purpose: 'discover', provider: 'openai', modelId: 'gpt-4o-mini' },
+    // openrouter depende do prefixo para enderecar o modelo
+    { profileId, purpose: 'dedupe', provider: 'openrouter', modelId: 'deepseek/deepseek-v4-flash' },
+  ]);
+  try {
+    // aplica a mesma decisao que o seed aplica, linha a linha
+    const rows = await db.select().from(s.modelProfileEntries).where(eq(s.modelProfileEntries.profileId, profileId));
+    for (const row of rows) {
+      const check = checkProviderModel(row.provider, row.modelId);
+      if (check.fix === 'stripped-prefix') {
+        await db.update(s.modelProfileEntries).set({ modelId: check.modelId }).where(eq(s.modelProfileEntries.id, row.id));
+      } else if (check.fix === 'foreign-vendor') {
+        await db.update(s.modelProfileEntries).set({ provider: 'openrouter' }).where(eq(s.modelProfileEntries.id, row.id));
+      }
+    }
+
+    const after = Object.fromEntries(
+      (await db.select().from(s.modelProfileEntries).where(eq(s.modelProfileEntries.profileId, profileId)))
+        .map((r) => [r.purpose, `${r.provider}:${r.modelId}`]),
+    );
+    // prefixo removido E credencial OpenAI preservada — trocar para openrouter
+    // exigiria uma chave que o operador nao cadastrou
+    assert.equal(after.generate, 'openai:gpt-4o-mini');
+    // sem equivalente nativo: unica leitura coerente e' rotear pelo OpenRouter
+    assert.equal(after.verify, 'openrouter:anthropic/claude-sonnet-4.5');
+    assert.equal(after.discover, 'openai:gpt-4o-mini');
+    assert.equal(after.dedupe, 'openrouter:deepseek/deepseek-v4-flash');
+  } finally {
+    await db.delete(s.modelProfiles).where(eq(s.modelProfiles.id, profileId));
+  }
+});

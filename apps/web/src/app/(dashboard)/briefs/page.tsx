@@ -12,6 +12,7 @@ import { AutoRefresh } from '@/components/auto-refresh';
 import { EmptyState } from '@/components/empty-state';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -102,7 +103,13 @@ export default async function BriefsPage() {
                   return (
                     <TableRow key={brief.id}>
                       <TableCell className="max-w-64">
-                        <p className="truncate font-medium">{brief.topic}</p>
+                        {brief.status === 'pending' ? (
+                          <p className="truncate font-medium">{brief.topic}</p>
+                        ) : (
+                          <Link href={`/briefs/${brief.id}`} className="block truncate font-medium hover:underline">
+                            {brief.topic}
+                          </Link>
+                        )}
                         {brief.error ? (
                           <p className="text-destructive max-w-full truncate text-xs">{brief.error}</p>
                         ) : null}
@@ -142,6 +149,11 @@ export default async function BriefsPage() {
                             </Link>
                           ) : null}
                           {brief.status === 'failed' ? <RegenerateBriefButton id={brief.id} /> : null}
+                          {brief.status === 'ready_for_review' || brief.status === 'published' ? (
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={`/briefs/${brief.id}`}>{t('view')}</Link>
+                            </Button>
+                          ) : null}
                           {brief.status === 'ready_for_review' ? <PublishBriefButton id={brief.id} /> : null}
                           {brief.status === 'pending' || brief.status === 'failed' ? (
                             <EditBriefButton initial={toInitial(brief)} />

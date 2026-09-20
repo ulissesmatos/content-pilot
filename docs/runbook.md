@@ -359,6 +359,35 @@ ajustam; template de dados estruturados não incorpora nada.
 geração inteira contra Postgres real, com provedores falsos (precisa de
 `TEST_DATABASE_URL`; sem ela é pulado).
 
+## Acompanhar a execução e revisar o artigo no painel
+
+**Acompanhamento ao vivo.** Todo botão que gera conteúdo (Descobrir agora, Gerar
+tema, Criar pauta, Executar agora, Regerar) abre um painel que segue a execução
+por polling em `/api/runs/<id>/progress`. As etapas (pesquisa, redação, revisão,
+imagens, embeds, publicação) vêm de marcadores `etapa: ...` que o worker grava no
+log da execução (`stageMarker`); o painel só os lê. "Descobrir agora" segue os runs
+filhos que a descoberta enfileira, porque é neles que o post é gerado. Ao terminar
+há dois botões: abrir o post no WordPress e abrir no sistema.
+
+**Prévia do artigo (`/briefs/<id>`).** Mostra o texto ATUAL do WordPress (se
+alguém editou lá, a tela reflete), com as imagens e embeds na posição real. O
+HTML passa por `sanitize-html` antes de ser desenhado: quem edita o site não
+consegue rodar script no painel. O vídeo do YouTube é o player
+(`youtube-nocookie`); o tweet é um cartão com link, sem carregar script de
+terceiros. Na lateral: relatório da revisão editorial e resumo das imagens.
+O botão de publicar fica desativado enquanto o post estiver sem capa.
+
+**Gerar outra imagem.** Cada imagem tem "Gerar outra com IA" (e a capa que faltou
+tem "Gerar capa"). O pedido vai para a fila `image.regenerate`: o worker gera no
+tamanho do slot, converte para WebP, envia ao WordPress e troca a imagem no post
+(o bloco inteiro é reescrito pelo `wp-image-ID`; a capa vira a imagem destacada).
+A imagem antiga continua na biblioteca de mídia. Exige a chave OpenAI e o modelo
+de imagem; sem isso a tela avisa antes de enfileirar. Uma troca por artigo por
+vez (`singletonKey`), para duas trocas não lerem o mesmo HTML e uma apagar a
+outra. Se a imagem foi removida do post no WordPress, a troca falha **antes** de
+gastar a geração. Sem permissão de edição no WordPress só a capa pode ser trocada,
+porque o HTML renderizado não traz o `wp-image-ID`.
+
 ## Migrações desta versão
 
 `0009_email_auth.sql` cria `auth_tokens` (links de troca de senha e confirmação,

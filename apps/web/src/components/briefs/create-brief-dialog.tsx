@@ -6,6 +6,7 @@ import { Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { createBriefAction, updateBriefAction } from '@/actions/briefs';
 import { Button } from '@/components/ui/button';
+import { useRunTracker } from '@/components/runs/run-tracker';
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,7 @@ function BriefDialog({
   trigger: ReactNode;
 }) {
   const router = useRouter();
+  const { track } = useRunTracker();
   const isEdit = !!initial;
   const [open, setOpen] = useState(false);
   const [siteId, setSiteId] = useState('');
@@ -94,10 +96,10 @@ function BriefDialog({
         }
         const result = await createBriefAction({ ...shared, siteId, templateId });
         if (result.ok) {
-          toast.success('Pauta criada — geração iniciada.');
           setFieldErrors({});
           setOpen(false);
-          router.push(`/runs/${result.data.runId}`);
+          // painel ao vivo com a geração, em vez de mandar para uma tela que só mostra a fila
+          track(result.data.runId);
         } else {
           setFieldErrors(result.fieldErrors ?? {});
           toast.error(result.error);

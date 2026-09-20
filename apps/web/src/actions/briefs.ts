@@ -6,7 +6,7 @@ import { and, briefs, eq, getTenantDb, runs, sites } from '@content-pilot/db';
 import { jobLlmConfigSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
-import { assertWorkspaceReady } from '@/lib/readiness';
+import { assertWorkspaceReady, getWorkspaceReadiness } from '@/lib/readiness';
 import { getBoss } from '@/lib/boss';
 import { assertTemplateAccessible } from '@/lib/tenant';
 import { getWordPressForSite } from '@/lib/wp';
@@ -184,7 +184,60 @@ export async function publishBriefAction(input: unknown): Promise<ActionResult> 
 
     await db.update(briefs).set({ status: 'published', updatedAt: new Date() }).where(eq(briefs.id, id));
     revalidatePath('/briefs');
+    revalidatePath(`/briefs/${id}`);
     return null;
+  });
+}
+
+const regenerateImageSchema = z.object({
+  id: z.string().uuid(),
+  /** 'cover' ou 'inline-N': o slot do relatório de imagens. */
+  slotId: z.string().regex(/^(cover|inline-\d{1,2})$/),
+  instruction: z.string().trim().max(500).default(''),
+});
+
+/**
+ * Gera de novo, com IA, uma imagem de um artigo já criado (ou a capa que faltou).
+ * Vai para o worker, que gera, converte, envia ao WordPress e troca no post.
+ */
+export async function regenerateImageAction(input: unknown): Promise<ActionResult<{ runId: string }>> {
+  return runAuthedAction(regenerateImageSchema, input, async (data, { workspaceId, email }) => {
+    const readiness = await getWorkspaceReadiness(workspaceId, email);
+    if (readiness.issues.some((i) => i.code === 'no-image-generator')) {
+      throw new UserFacingError('Ative a geração de imagem por IA (chave OpenAI e modelo de imagem) para gerar de novo.');
+    }
+
+    const db = getTenantDb(workspaceId);
+    const [brief] = await db
+      .select({ id: briefs.id, status: briefs.status, createdWpPostId: briefs.createdWpPostId })
+      .from(briefs)
+      .where(and(eq(briefs.id, data.id), eq(briefs.workspaceId, workspaceId)))
+      .limit(1);
+    if (!brief) throw new UserFacingError('Pauta não encontrada.');
+    if ((brief.status !== 'ready_for_review' && brief.status !== 'published') || !brief.createdWpPostId) {
+      throw new UserFacingError('O artigo precisa estar criado no WordPress para trocar uma imagem.');
+    }
+
+    const [run] = await db
+      .insert(runs)
+      .values({ workspaceId, briefId: data.id, kind: 'update', trigger: 'manual', status: 'running' })
+      .returning({ id: runs.id });
+
+    const boss = await getBoss();
+    // uma troca por artigo por vez: duas em paralelo leriam o mesmo HTML e uma apagaria a outra
+    const sent = await boss.send(
+      'image.regenerate',
+      { briefId: data.id, runId: run!.id, slotId: data.slotId, instruction: data.instruction || undefined },
+      { singletonKey: `img:${data.id}`, retryLimit: 0, expireInSeconds: 600 },
+    );
+    if (!sent) {
+      await db
+        .update(runs)
+        .set({ status: 'cancelled', finishedAt: new Date(), error: 'já há uma imagem sendo gerada para este artigo' })
+        .where(eq(runs.id, run!.id));
+      throw new UserFacingError('Já há uma imagem sendo gerada para este artigo. Aguarde terminar.');
+    }
+    return { runId: run!.id };
   });
 }
 

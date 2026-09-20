@@ -195,6 +195,37 @@ export function buildGenerationPrompt(slot: ImageSlot, topic: string): string {
     .join(' ');
 }
 
+/**
+ * Prompt para gerar UMA imagem de novo, a pedido do usuário na tela de preview.
+ * O que o usuário escreveu vem primeiro e manda; o resto fixa o estilo editorial
+ * e a regra de texto (o mesmo critério do slot original).
+ */
+export function buildRegenerationPrompt(input: {
+  role: 'cover' | 'inline';
+  topic: string;
+  /** O que a imagem atual mostra (alt/legenda) ou o título do artigo. */
+  subject: string;
+  /** Pedido do usuário: "menos escuro", "mostrar o app aberto". */
+  instruction?: string;
+  size: ImageSize;
+  allowText?: boolean;
+}): string {
+  const role = input.role === 'cover' ? 'cover image' : 'in-article illustration';
+  const ratio = input.size.width >= input.size.height ? 'wide landscape composition' : 'portrait composition';
+  const asked = input.instruction?.trim();
+  return [
+    `Editorial ${role} for a blog article about "${input.topic}".`,
+    asked ? `The editor asked for exactly this: ${asked.slice(0, 600)}` : `It should show: ${input.subject.slice(0, 300)}`,
+    asked ? `Context of the image: ${input.subject.slice(0, 200)}` : '',
+    `High-quality, ${ratio}, clean, subject clearly visible, natural lighting.`,
+    input.allowText
+      ? 'Text is allowed only if essential to the subject.'
+      : 'No text, no captions, no watermarks, no logos, no UI elements.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export async function illustrateArticle(input: IllustrateInput, deps: IllustrateDeps): Promise<IllustrateResult> {
   const log = deps.log ?? (() => {});
   const llmCalls: LlmCallRecord[] = [];

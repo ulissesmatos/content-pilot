@@ -4,12 +4,12 @@
 const BLOCKED_HINT = 'Configuração incompleta: veja o aviso no topo da página.';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Play, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { deleteJobAction, runJobNowAction, toggleJobAction } from '@/actions/jobs';
 import { Button } from '@/components/ui/button';
+import { useRunTracker } from '@/components/runs/run-tracker';
 import {
   Dialog,
   DialogContent,
@@ -39,7 +39,7 @@ export function JobEnabledSwitch({ id, enabled }: { id: string; enabled: boolean
 
 export function RunNowButton({ id, blocked = false }: { id: string; blocked?: boolean }) {
   const t = useTranslations('jobs');
-  const router = useRouter();
+  const { track } = useRunTracker();
   const [pending, startTransition] = useTransition();
   return (
     <Button
@@ -51,8 +51,7 @@ export function RunNowButton({ id, blocked = false }: { id: string; blocked?: bo
         startTransition(async () => {
           const result = await runJobNowAction({ id });
           if (result.ok) {
-            toast.success(t('runStarted'));
-            router.push(`/runs/${result.data.runId}`);
+            track(result.data.runId);
           } else {
             toast.error(result.error);
           }

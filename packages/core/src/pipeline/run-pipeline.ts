@@ -16,6 +16,7 @@ import {
   type TemplateConfig,
 } from '../templates/schema';
 import { applyStyleGuard, buildStyleInstructions } from '../text/style-guard';
+import { stageMarker } from './stages';
 import { validateOutput } from './validate-output';
 import { buildTrimmedContext, prePassCheck } from './pre-pass';
 import {
@@ -331,6 +332,7 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
   const prompt = interpolate(promptTemplate, promptVars) + buildStyleInstructions(stylePolicy, language);
 
   // 10. Chamada LLM de geração
+  if (input.mode === 'generate') log(stageMarker('redacao'));
   try {
     await deps.checkBudget?.();
   } catch (err) {

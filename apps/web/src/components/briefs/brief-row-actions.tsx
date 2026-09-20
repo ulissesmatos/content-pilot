@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Globe, RotateCcw, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { deleteBriefAction, publishBriefAction, regenerateBriefAction } from '@/actions/briefs';
 import { Button } from '@/components/ui/button';
+import { useRunTracker } from '@/components/runs/run-tracker';
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import {
 
 export function RegenerateBriefButton({ id }: { id: string }) {
   const t = useTranslations('briefs');
-  const router = useRouter();
+  const { track } = useRunTracker();
   const [pending, startTransition] = useTransition();
   return (
     <Button
@@ -30,8 +30,7 @@ export function RegenerateBriefButton({ id }: { id: string }) {
         startTransition(async () => {
           const result = await regenerateBriefAction({ id });
           if (result.ok) {
-            toast.success(t('regenerateStarted'));
-            router.push(`/runs/${result.data.runId}`);
+            track(result.data.runId);
           } else {
             toast.error(result.error);
           }

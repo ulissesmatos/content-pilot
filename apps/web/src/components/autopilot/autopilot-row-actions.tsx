@@ -4,7 +4,6 @@
 const BLOCKED_HINT = 'Configuração incompleta: veja o aviso no topo da página.';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import { Sparkles, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -20,6 +19,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { useRunTracker } from '@/components/runs/run-tracker';
 
 export function AutopilotEnabledSwitch({ id, enabled }: { id: string; enabled: boolean }) {
   const [pending, startTransition] = useTransition();
@@ -39,7 +39,7 @@ export function AutopilotEnabledSwitch({ id, enabled }: { id: string; enabled: b
 
 export function RunDiscoveryButton({ id, blocked = false }: { id: string; blocked?: boolean }) {
   const t = useTranslations('autopilot');
-  const router = useRouter();
+  const { track } = useRunTracker();
   const [pending, startTransition] = useTransition();
   return (
     <Button
@@ -51,8 +51,8 @@ export function RunDiscoveryButton({ id, blocked = false }: { id: string; blocke
         startTransition(async () => {
           const result = await runAutopilotNowAction({ id });
           if (result.ok) {
-            toast.success(t('discoveryStarted'));
-            router.push(`/runs/${result.data.runId}`);
+            // painel ao vivo, que segue a descoberta até os posts que ela gera
+            track(result.data.runId);
           } else {
             toast.error(result.error);
           }

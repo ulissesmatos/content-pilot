@@ -24,7 +24,7 @@ export async function pendingRunJobs(workspaceId: string, runId: string) {
     inner join public.runs r on r.id::text = j.data ->> 'runId'
     where r.workspace_id = ${workspaceId}::uuid and r.id = ${runId}::uuid
       and j.state in ('created', 'retry')
-      and j.name in ('job.run', 'post.process', 'brief.generate', 'autopilot.discover')
+      and j.name in ('job.run', 'post.process', 'brief.generate', 'autopilot.discover', 'image.regenerate')
   `);
   return result.rows as Array<{ id: string; name: string }>;
 }

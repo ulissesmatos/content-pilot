@@ -1,5 +1,6 @@
 import { AppSidebar } from '@/components/app-sidebar';
 import { EmailVerificationNotice } from '@/components/email-verification-notice';
+import { RunTrackerProvider } from '@/components/runs/run-tracker';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { UserMenu } from '@/components/user-menu';
 import { Separator } from '@/components/ui/separator';
@@ -19,6 +20,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const showVerifyNotice = !session.emailVerified && (await isEmailConfigured());
 
   return (
+    <RunTrackerProvider>
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
@@ -35,5 +37,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </main>
       </SidebarInset>
     </SidebarProvider>
+    </RunTrackerProvider>
   );
 }

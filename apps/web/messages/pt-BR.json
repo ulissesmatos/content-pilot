@@ -223,7 +223,8 @@
     "deleteConfirm": "Excluir",
     "deleting": "Excluindo…",
     "deleted": "Pauta excluída.",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "view": "Ver"
   },
   "jobs": {
     "title": "Atualizar posts",
@@ -471,5 +472,98 @@
     "navSettings": "Cobrança e URLs",
     "navProfiles": "Perfis de modelo",
     "navCatalog": "Modelos disponíveis"
+  },
+  "tracker": {
+    "title": "Acompanhando a execução",
+    "titleCreate": "Gerando o artigo",
+    "titleDiscover": "Descobrindo temas",
+    "running": "Você pode fechar este painel: a geração continua em segundo plano.",
+    "doneOk": "Tudo pronto.",
+    "doneFailed": "A execução terminou com erro.",
+    "connecting": "Conectando à execução...",
+    "skipped": "não usada",
+    "showLog": "Ver log ({count} linhas)",
+    "hideLog": "Ocultar log",
+    "logEmpty": "Aguardando o worker começar...",
+    "openWp": "Abrir no WordPress",
+    "openSystem": "Abrir no sistema",
+    "pendingBriefs": "{count, plural, one {# pauta aguarda} other {# pautas aguardam}} revisão manual",
+    "goToBriefs": "Ver pautas",
+    "noNewTopics": "Nenhum tema novo desta vez: tudo o que apareceu já estava coberto.",
+    "viewRun": "Ver execução completa",
+    "close": "Fechar",
+    "keepInBackground": "Continuar em segundo plano",
+    "error": {
+      "unauthorized": "Sua sessão expirou. Entre de novo para acompanhar.",
+      "not_found": "Não encontrei esta execução.",
+      "network": "Perdi a conexão com o servidor. A geração continua; abra a execução completa para conferir."
+    }
+  },
+  "preview": {
+    "back": "Voltar para as pautas",
+    "openWp": "Abrir no WordPress",
+    "publishNeedsCover": "Gere a capa antes de publicar.",
+    "wpStatus": {
+      "draft": "Rascunho no WordPress",
+      "publish": "Publicado no WordPress",
+      "pending": "Pendente no WordPress",
+      "private": "Privado no WordPress",
+      "future": "Agendado no WordPress"
+    },
+    "generatingTitle": "O artigo ainda está sendo gerado",
+    "generatingBody": "Esta página se atualiza sozinha. Quando terminar, o texto e as imagens aparecem aqui.",
+    "failedTitle": "A geração falhou",
+    "failedBody": "Sem detalhes do erro. Veja a execução para o log completo.",
+    "postErrorTitle": "Não consegui carregar o texto do WordPress",
+    "coverMissingTitle": "Este artigo está sem capa",
+    "coverMissingBody": "A capa é obrigatória, por isso ele ficou como rascunho. Gere uma capa com IA para poder publicar.",
+    "noPost": "Este artigo ainda não tem post no WordPress.",
+    "cover": "Capa",
+    "imageN": "Imagem {n}",
+    "origin": {
+      "generated": "Gerada por IA",
+      "source": "Fonte oficial",
+      "search": "Da web"
+    },
+    "regenerate": "Gerar outra com IA",
+    "regenerateTitle": "Gerar outra imagem",
+    "regenerateDescription": "A IA cria uma imagem nova no lugar desta, no mesmo tamanho, e o post no WordPress é atualizado. A imagem antiga continua na biblioteca de mídia.",
+    "generateCover": "Gerar capa com IA",
+    "generateCoverDescription": "A IA cria a capa do artigo no tamanho configurado no template e ela é definida como imagem destacada do post.",
+    "regenerateLabel": "O que ela deve mostrar (opcional)",
+    "regeneratePlaceholder": "Ex.: o aplicativo aberto na tela de chat, sem pessoas",
+    "regenerateConfirm": "Gerar imagem",
+    "regenerating": "Enviando...",
+    "livePostWarning": "Este artigo já está publicado: a troca aparece no site assim que terminar.",
+    "cancel": "Cancelar",
+    "videoTitle": "Vídeo do YouTube",
+    "tweetBy": "Tweet de @{user}",
+    "embedOther": "Conteúdo incorporado",
+    "openOriginal": "Ver original",
+    "reviewTitle": "Revisão editorial",
+    "reviewNone": "Este artigo não passou pela etapa de revisão.",
+    "reviewStatus": {
+      "revised": "Revisado",
+      "unchanged": "Sem ajustes",
+      "rejected": "Descartada",
+      "failed": "Falhou",
+      "budget_exceeded": "Sem orçamento"
+    },
+    "reviewRejected": "A revisão propunha mudanças, mas elas quebravam uma regra de segurança do texto (links, números ou estrutura). O texto original foi mantido.",
+    "changeKind": {
+      "dull": "Trecho maçante",
+      "thin": "Seção curta",
+      "ai_tone": "Tom de IA",
+      "other": "Ajuste"
+    },
+    "remainingTells": "Ainda soa como IA:",
+    "imagesTitle": "Imagens",
+    "imagesEmpty": "Nenhuma imagem foi adicionada a este artigo.",
+    "imagesSummary": "{total, plural, one {# imagem} other {# imagens}}: {generated} gerada(s) por IA e {real} real(is).",
+    "imagesNotes": "Como cada imagem foi escolhida",
+    "embedsTitle": "Vídeos e tweets",
+    "embedsEmpty": "Nenhum vídeo ou tweet verificado entrou neste artigo.",
+    "embedYoutube": "Vídeo do YouTube",
+    "embedTweet": "Tweet"
   }
 }

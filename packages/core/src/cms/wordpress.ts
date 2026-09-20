@@ -26,6 +26,7 @@ interface WpPostResponse {
   slug: string;
   link: string;
   status?: string;
+  featured_media?: number;
 }
 
 interface WpTermResponse {
@@ -84,6 +85,7 @@ export class WordPressAdapter implements CmsAdapter {
       contentRaw: raw ?? p.content?.rendered ?? '',
       usedRenderedFallback: raw === undefined,
       status: p.status,
+      featuredMediaId: p.featured_media && p.featured_media > 0 ? p.featured_media : undefined,
     };
   }
 
@@ -126,15 +128,19 @@ export class WordPressAdapter implements CmsAdapter {
 
   async getPost(id: number): Promise<CmsPost> {
     const post = await this.request<WpPostResponse>(
-      `/posts/${id}?context=edit&_fields=id,title,content,slug,link,status`,
+      `/posts/${id}?context=edit&_fields=id,title,content,slug,link,status,featured_media`,
     );
     return this.toCmsPost(post);
   }
 
   async updatePost(id: number, patch: CmsUpdatePostInput): Promise<CmsPost> {
+    // mapeia featuredMediaId → featured_media (nome do campo no WP REST)
+    const { featuredMediaId, ...rest } = patch;
+    const body: Record<string, unknown> = { ...rest };
+    if (featuredMediaId) body.featured_media = featuredMediaId;
     const post = await this.request<WpPostResponse>(`/posts/${id}`, {
       method: 'POST',
-      body: JSON.stringify(patch),
+      body: JSON.stringify(body),
     });
     return this.toCmsPost(post);
   }

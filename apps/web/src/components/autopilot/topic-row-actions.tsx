@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { dismissTopicAction, generateTopicNowAction } from '@/actions/autopilot';
 import { Button } from '@/components/ui/button';
+import { useRunTracker } from '@/components/runs/run-tracker';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ import {
 export function TopicRowActions({ topicId, topic }: { topicId: string; topic: string }) {
   const t = useTranslations('autopilot');
   const router = useRouter();
+  const { track } = useRunTracker();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -33,8 +35,7 @@ export function TopicRowActions({ topicId, topic }: { topicId: string; topic: st
           startTransition(async () => {
             const result = await generateTopicNowAction({ id: topicId });
             if (result.ok) {
-              toast.success(t('topicGenerateQueued'));
-              router.push(`/runs/${result.data.runId}`);
+              track(result.data.runId);
             } else {
               toast.error(result.error);
             }

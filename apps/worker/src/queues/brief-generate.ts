@@ -15,11 +15,12 @@ import {
   reviewArticle,
   runPipeline,
   slugify,
+  stageMarker,
   suggestedInlineCount,
+  type EditorialReport,
   type EmbedItem,
   type ImageHint,
   type ImageReport,
-  type ReviewChange,
 } from '@content-pilot/core';
 import {
   preflightLlmTasks,
@@ -60,6 +61,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
 
   await db.update(runs).set({ expectedItems: 1 }).where(eq(runs.id, runId));
   log(`geração da pauta "${brief.topic}" iniciada`);
+  log(stageMarker('pesquisa'));
 
   const fail = async (error: string) => {
     await db
@@ -235,11 +237,12 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     // imagem ajudaria. A saída só entra se passar pelas guardas (link, número,
     // tamanho, estrutura); do contrário fica o texto original. Falha aqui nunca
     // derruba o post: é polimento.
-    let reviewNotes: { status: string; changes: ReviewChange[]; reason: string | null; remainingTells: string[] } | null = null;
+    let reviewNotes: EditorialReport['review'] = null;
     let imageHints: ImageHint[] = [];
     const finalTitle = result.newTitle ?? brief.topic;
     let reviewedHtml = result.finalHtml;
     if (isReviewEnabled(template.config)) {
+      log(stageMarker('revisao'));
       try {
         const reviewModel = await resolveTaskModel(db, workspaceId, 'review');
         const llmReview = await resolveLlmProvider(db, workspaceId, reviewModel);
@@ -280,6 +283,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     // parágrafos que já têm imagem: o embed não cai neles
     let imageParagraphs: number[] = [];
     if (template.config.images.enabled) {
+      log(stageMarker('imagens'));
       // O editor pode pedir mais imagens do que a proporção do texto sugere, até o teto do template.
       const inlineCount = Math.min(
         template.config.images.inlineMax,
@@ -337,6 +341,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     let embedNotes: string[] = [];
     const embedPolicy = resolveEmbedPolicy(template.config);
     if (embedPolicy.video || embedPolicy.maxTweets > 0) {
+      log(stageMarker('embeds'));
       try {
         const found = await findEmbeds(
           {
@@ -366,6 +371,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
       log('post NÃO publicado: nenhuma capa foi obtida. Criado como rascunho para você resolver a capa.');
     }
 
+    log(stageMarker('publicacao'));
     const created = await wp.createPost({
       title: finalTitle,
       content: finalHtml,
@@ -403,7 +409,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
         createdWpPostId: created.id,
         createdWpPostUrl: created.link,
         imageReport,
-        editorialReport: { review: reviewNotes, embeds: embedItems, embedNotes },
+        editorialReport: { review: reviewNotes, embeds: embedItems, embedNotes } satisfies EditorialReport,
         error: null,
         updatedAt: new Date(),
       })

@@ -332,6 +332,20 @@ describeIf('handleBriefGenerate (Postgres real, provedores falsos)', () => {
     expect(editorial.review.status).toBe('revised');
     expect(editorial.embeds.map((e) => e.kind).sort()).toEqual(['tweet', 'youtube']);
 
+    // o que o worker ESCREVEU no log é o que a tela de acompanhamento LÊ: as 6 etapas, em ordem
+    const { deriveStages } = await import('@content-pilot/core');
+    const lines = (
+      await db.select().from(dbMod.runLogs).where(dbMod.eq(dbMod.runLogs.runId, runId)).orderBy(dbMod.asc(dbMod.runLogs.ts))
+    ).map((l) => l.line);
+    expect(deriveStages(lines, 'success', 'create').map((st) => `${st.key}:${st.status}`)).toEqual([
+      'pesquisa:done', 'redacao:done', 'revisao:done', 'imagens:done', 'embeds:done', 'publicacao:done',
+    ]);
+    const markers = lines.filter((l) => l.startsWith('etapa: '));
+    expect(markers).toEqual([
+      'etapa: pesquisando fontes', 'etapa: escrevendo o artigo', 'etapa: revisão editorial',
+      'etapa: imagens', 'etapa: vídeo e tweets', 'etapa: enviando ao WordPress',
+    ]);
+
     // todas as etapas de IA gastaram tokens que foram registrados
     const calls = await db.select().from(dbMod.llmCalls).where(dbMod.eq(dbMod.llmCalls.runId, runId));
     const purposes = new Set(calls.map((c) => c.purpose));
@@ -427,5 +441,11 @@ describeIf('handleBriefGenerate (Postgres real, provedores falsos)', () => {
     expect(schemas).not.toContain('content_pilot_review');
     expect(schemas).not.toContain('content_pilot_embeds');
     expect(world.posts[0]!.content).not.toContain('wp:embed');
+
+    // etapa que o template desligou NÃO aparece como feita: a tela a mostra como pulada
+    const { deriveStages } = await import('@content-pilot/core');
+    const lines = (await db.select().from(dbMod.runLogs).where(dbMod.eq(dbMod.runLogs.runId, runId))).map((l) => l.line);
+    const st = Object.fromEntries(deriveStages(lines, 'success', 'create').map((x) => [x.key, x.status]));
+    expect(st).toMatchObject({ revisao: 'skipped', embeds: 'skipped', imagens: 'done', publicacao: 'done' });
   });
 });

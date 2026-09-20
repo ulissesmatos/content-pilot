@@ -6,6 +6,7 @@ import {
   QUEUE,
   type AutopilotDiscoverPayload,
   type BriefGeneratePayload,
+  type ImageRegeneratePayload,
   type JobRunPayload,
   type PostProcessPayload,
 } from './queues/names';
@@ -14,6 +15,7 @@ import { handleJobRun } from './queues/job-run';
 import { handlePostProcess } from './queues/post-process';
 import { handleBriefGenerate } from './queues/brief-generate';
 import { handleAutopilotDiscover } from './queues/autopilot-discover';
+import { handleImageRegenerate } from './queues/image-regenerate';
 import { handleCatalogSync } from './queues/catalog-sync';
 import { startHealthServer } from './health-server';
 
@@ -57,6 +59,10 @@ async function main() {
 
   await boss.work(QUEUE.briefGenerate, async (jobs: Array<{ data: BriefGeneratePayload }>) => {
     for (const job of jobs) await handleBriefGenerate(db, job.data);
+  });
+
+  await boss.work(QUEUE.imageRegenerate, async (jobs: Array<{ data: ImageRegeneratePayload }>) => {
+    for (const job of jobs) await handleImageRegenerate(db, job.data);
   });
 
   await boss.work(QUEUE.autopilotDiscover, async (jobs: Array<{ data: AutopilotDiscoverPayload }>) => {

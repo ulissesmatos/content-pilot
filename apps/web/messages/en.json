@@ -223,7 +223,8 @@
     "deleteConfirm": "Delete",
     "deleting": "Deleting…",
     "deleted": "Brief deleted.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "view": "View"
   },
   "jobs": {
     "title": "Update posts",
@@ -471,5 +472,98 @@
     "navSettings": "Billing & URLs",
     "navProfiles": "Model profiles",
     "navCatalog": "Available models"
+  },
+  "tracker": {
+    "title": "Following the run",
+    "titleCreate": "Generating the article",
+    "titleDiscover": "Discovering topics",
+    "running": "You can close this panel: generation continues in the background.",
+    "doneOk": "All done.",
+    "doneFailed": "The run finished with an error.",
+    "connecting": "Connecting to the run...",
+    "skipped": "not used",
+    "showLog": "Show log ({count} lines)",
+    "hideLog": "Hide log",
+    "logEmpty": "Waiting for the worker to start...",
+    "openWp": "Open on WordPress",
+    "openSystem": "Open in the app",
+    "pendingBriefs": "{count, plural, one {# brief awaits} other {# briefs await}} manual review",
+    "goToBriefs": "View briefs",
+    "noNewTopics": "No new topics this time: everything found was already covered.",
+    "viewRun": "View full run",
+    "close": "Close",
+    "keepInBackground": "Keep in background",
+    "error": {
+      "unauthorized": "Your session expired. Sign in again to keep following.",
+      "not_found": "I could not find this run.",
+      "network": "Lost the connection to the server. Generation continues; open the full run to check."
+    }
+  },
+  "preview": {
+    "back": "Back to briefs",
+    "openWp": "Open on WordPress",
+    "publishNeedsCover": "Generate the cover before publishing.",
+    "wpStatus": {
+      "draft": "Draft on WordPress",
+      "publish": "Published on WordPress",
+      "pending": "Pending on WordPress",
+      "private": "Private on WordPress",
+      "future": "Scheduled on WordPress"
+    },
+    "generatingTitle": "The article is still being generated",
+    "generatingBody": "This page refreshes on its own. When it finishes, the text and images show up here.",
+    "failedTitle": "Generation failed",
+    "failedBody": "No error details. Open the run for the full log.",
+    "postErrorTitle": "Could not load the text from WordPress",
+    "coverMissingTitle": "This article has no cover",
+    "coverMissingBody": "A cover is required, so it stayed a draft. Generate a cover with AI to be able to publish.",
+    "noPost": "This article has no WordPress post yet.",
+    "cover": "Cover",
+    "imageN": "Image {n}",
+    "origin": {
+      "generated": "AI generated",
+      "source": "Official source",
+      "search": "From the web"
+    },
+    "regenerate": "Generate another with AI",
+    "regenerateTitle": "Generate another image",
+    "regenerateDescription": "AI creates a new image in place of this one, at the same size, and the WordPress post is updated. The old image stays in the media library.",
+    "generateCover": "Generate cover with AI",
+    "generateCoverDescription": "AI creates the article cover at the size set in the template and it becomes the post featured image.",
+    "regenerateLabel": "What it should show (optional)",
+    "regeneratePlaceholder": "E.g. the app open on the chat screen, no people",
+    "regenerateConfirm": "Generate image",
+    "regenerating": "Sending...",
+    "livePostWarning": "This article is already published: the change shows on the site as soon as it finishes.",
+    "cancel": "Cancel",
+    "videoTitle": "YouTube video",
+    "tweetBy": "Tweet by @{user}",
+    "embedOther": "Embedded content",
+    "openOriginal": "View original",
+    "reviewTitle": "Editorial review",
+    "reviewNone": "This article did not go through the review step.",
+    "reviewStatus": {
+      "revised": "Revised",
+      "unchanged": "No changes",
+      "rejected": "Discarded",
+      "failed": "Failed",
+      "budget_exceeded": "Out of budget"
+    },
+    "reviewRejected": "The review proposed changes, but they broke a text safety rule (links, numbers or structure). The original text was kept.",
+    "changeKind": {
+      "dull": "Dull passage",
+      "thin": "Thin section",
+      "ai_tone": "AI tone",
+      "other": "Adjustment"
+    },
+    "remainingTells": "Still sounds like AI:",
+    "imagesTitle": "Images",
+    "imagesEmpty": "No image was added to this article.",
+    "imagesSummary": "{total, plural, one {# image} other {# images}}: {generated} AI generated and {real} real.",
+    "imagesNotes": "How each image was chosen",
+    "embedsTitle": "Videos and tweets",
+    "embedsEmpty": "No verified video or tweet made it into this article.",
+    "embedYoutube": "YouTube video",
+    "embedTweet": "Tweet"
   }
 }

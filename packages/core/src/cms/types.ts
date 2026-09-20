@@ -10,6 +10,8 @@ export interface CmsPost {
   /** true quando o CMS não devolveu o raw e caímos no rendered (flag de aviso). */
   usedRenderedFallback: boolean;
   status?: string;
+  /** Imagem destacada (ID de mídia); ausente quando o post não tem capa. */
+  featuredMediaId?: number;
 }
 
 export interface CmsTerm {
@@ -64,6 +66,8 @@ export interface CmsUpdatePostInput {
   title?: string;
   content?: string;
   status?: string;
+  /** Troca a imagem destacada (ID de mídia de uploadMedia). */
+  featuredMediaId?: number;
 }
 
 export interface CmsConnectionResult {

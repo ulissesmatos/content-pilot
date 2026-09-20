@@ -20,6 +20,7 @@ import {
   PlanLimitError,
   resolveStylePolicy,
   runDiscovery,
+  stageMarker,
   type DiscoveryCandidate,
 } from '@content-pilot/core';
 import type { PgBoss } from 'pg-boss';
@@ -165,6 +166,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
       .then((t) => resolveStylePolicy(t.config))
       .catch(() => null);
 
+    log(stageMarker('descoberta'));
     const result = await runDiscovery(
       {
         seedTopics: cfg.seedTopics,

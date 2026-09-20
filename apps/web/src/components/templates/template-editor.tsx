@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ImagesSettings, TextQualitySettings, type Block } from '@/components/templates/template-quality-tabs';
 
 /**
  * Editor de template. O estado-fonte é o objeto `cfg` (config completo);
@@ -72,6 +73,10 @@ export function TemplateEditor({
   const [newLocale, setNewLocale] = useState('');
 
   const patchCfg = (patch: Partial<Cfg>) => setCfg((prev) => ({ ...prev, ...patch }));
+
+  // Só o campo mudado é gravado no bloco: o que o template não define continua valendo o padrão do worker.
+  const patchBlock = (key: Block, patch: Record<string, unknown>) =>
+    setCfg((prev) => ({ ...prev, [key]: { ...((prev[key] as object | undefined) ?? {}), ...patch } }));
 
   const setPrompt = (field: keyof PromptSet, value: string) => {
     setCfg((prev) => {
@@ -163,6 +168,8 @@ export function TemplateEditor({
       <Tabs defaultValue="geral">
         <TabsList>
           <TabsTrigger value="geral">Geral</TabsTrigger>
+          <TabsTrigger value="imagens">Imagens</TabsTrigger>
+          <TabsTrigger value="qualidade">Texto e revisão</TabsTrigger>
           <TabsTrigger value="prompts">Prompts</TabsTrigger>
           <TabsTrigger value="buscas">Buscas</TabsTrigger>
           <TabsTrigger value="fontes">Fontes</TabsTrigger>
@@ -200,6 +207,14 @@ export function TemplateEditor({
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="imagens">
+          <ImagesSettings cfg={cfg} patch={patchBlock} readOnly={readOnly} />
+        </TabsContent>
+
+        <TabsContent value="qualidade">
+          <TextQualitySettings cfg={cfg} patch={patchBlock} readOnly={readOnly} />
         </TabsContent>
 
         <TabsContent value="prompts">

@@ -38,6 +38,7 @@ export * from './llm/client';
 export * from './llm/pricing';
 export * from './templates/interpolate';
 export * from './templates/schema';
+export * from './templates/policy';
 export * from './templates/seeds/game-codes';
 export * from './templates/seeds/generic-article';
 export * from './renderers';

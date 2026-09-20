@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { ExternalLink, PenLine } from 'lucide-react';
 import { briefs, contentTemplates, getTenantDb, runs, sites } from '@content-pilot/db';
+import { summarizeTemplate } from '@content-pilot/core/client';
 import { CreateBriefDialog, EditBriefButton, type BriefFormInitial } from '@/components/briefs/create-brief-dialog';
 import {
   DeleteBriefButton,
@@ -40,10 +41,16 @@ export default async function BriefsPage() {
       .limit(100),
     db.select({ id: sites.id, name: sites.name }).from(sites).where(eq(sites.workspaceId, workspaceId)),
     db
-      .select({ id: contentTemplates.id, name: contentTemplates.name })
+      .select({ id: contentTemplates.id, name: contentTemplates.name, config: contentTemplates.config })
       .from(contentTemplates)
       .where(or(isNull(contentTemplates.workspaceId), eq(contentTemplates.workspaceId, workspaceId))),
   ]);
+  // o formulário mostra o que cada template faz (revisão, imagens, embeds)
+  const templateOptions = templateRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    summary: summarizeTemplate((r.config ?? {}) as Parameters<typeof summarizeTemplate>[0]),
+  }));
 
   // Última execução de cada pauta (link para a auditoria)
   const briefIds = briefRows.map((r) => r.brief.id);
@@ -77,7 +84,7 @@ export default async function BriefsPage() {
     <>
       <AutoRefresh enabled={hasActive} />
       <PageHeader title={t('title')} description={t('description')}>
-        <CreateBriefDialog sites={siteRows} templates={templateRows} />
+        <CreateBriefDialog sites={siteRows} templates={templateOptions} />
       </PageHeader>
       <ReadinessAlert issues={readiness.issues} />
       {briefRows.length === 0 ? (

@@ -559,11 +559,14 @@
     "remainingTells": "Ainda soa como IA:",
     "imagesTitle": "Imagens",
     "imagesEmpty": "Nenhuma imagem foi adicionada a este artigo.",
-    "imagesSummary": "{total, plural, one {# imagem} other {# imagens}}: {generated} gerada(s) por IA e {real} real(is).",
     "imagesNotes": "Como cada imagem foi escolhida",
     "embedsTitle": "Vídeos e tweets",
     "embedsEmpty": "Nenhum vídeo ou tweet verificado entrou neste artigo.",
     "embedYoutube": "Vídeo do YouTube",
-    "embedTweet": "Tweet"
+    "embedTweet": "Tweet",
+    "imagesTotal": "{count, plural, one {# imagem} other {# imagens}}",
+    "imagesReal": "{count, plural, one {# real} other {# reais}}",
+    "imagesGenerated": "{count, plural, one {# gerada por IA} other {# geradas por IA}}",
+    "postUnavailable": "O texto não carregou agora, então não há prévia. Use \"Abrir no WordPress\" para ver o post."
   }
 }

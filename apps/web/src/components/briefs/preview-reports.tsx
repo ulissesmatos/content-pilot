@@ -1,4 +1,4 @@
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { EditorialReport, ImageReport } from '@content-pilot/core';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -68,8 +68,14 @@ export function ReviewCard({ report }: { report: EditorialReport | null }) {
 
 export function ImagesCard({ images }: { images: ImageReport }) {
   const t = useTranslations('preview');
+  const locale = useLocale();
   const counts = { generated: 0, source: 0, search: 0 };
   for (const i of images.images) counts[i.origin]++;
+  const real = counts.source + counts.search;
+  const summaryParts = [
+    real > 0 ? t('imagesReal', { count: real }) : '',
+    counts.generated > 0 ? t('imagesGenerated', { count: counts.generated }) : '',
+  ].filter(Boolean);
 
   return (
     <Card>
@@ -81,11 +87,8 @@ export function ImagesCard({ images }: { images: ImageReport }) {
           <p className="text-muted-foreground">{t('imagesEmpty')}</p>
         ) : (
           <p className="text-muted-foreground">
-            {t('imagesSummary', {
-              total: images.images.length,
-              generated: counts.generated,
-              real: counts.source + counts.search,
-            })}
+            {t('imagesTotal', { count: images.images.length })}
+            {summaryParts.length > 0 ? `: ${new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(summaryParts)}.` : '.'}
           </p>
         )}
         {images.notes.length > 0 ? (

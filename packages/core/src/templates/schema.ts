@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { JsonSchema } from '../llm/types';
+import { embedPolicyOf, reviewEnabledOf, stylePolicyOf, type EmbedPolicy } from './policy';
+import type { StylePolicy } from '../text/style-guard';
 
 /**
  * Schema do `config` JSONB de content_templates. Tudo que era hardcoded no
@@ -196,12 +198,8 @@ export type TemplateConfig = z.infer<typeof templateConfigSchema>;
  * artigo; nada em template de dados estruturados (o texto em volta do widget é
  * curto e um vídeo ali só polui).
  */
-export function resolveEmbedPolicy(cfg: TemplateConfig): { video: boolean; maxTweets: number } {
-  const structured = cfg.extraction.enabled;
-  return {
-    video: cfg.embeds?.video ?? !structured,
-    maxTweets: cfg.embeds?.maxTweets ?? (structured ? 0 : 2),
-  };
+export function resolveEmbedPolicy(cfg: TemplateConfig): EmbedPolicy {
+  return embedPolicyOf(cfg.extraction.enabled, cfg.embeds);
 }
 
 /**
@@ -210,16 +208,12 @@ export function resolveEmbedPolicy(cfg: TemplateConfig): { video: boolean; maxTw
  * widget é curto e estruturado e uma reescrita só arriscaria o dado.
  */
 export function isReviewEnabled(cfg: TemplateConfig): boolean {
-  return cfg.review?.enabled ?? !cfg.extraction.enabled;
+  return reviewEnabledOf(cfg.extraction.enabled, cfg.review);
 }
 
 /** Política de estilo efetiva do template, com os padrões aplicados. */
-export function resolveStylePolicy(cfg: TemplateConfig): { noDashes: boolean; datePolicy: 'avoid' | 'allow' } {
-  return {
-    noDashes: cfg.style?.noDashes ?? true,
-    // template que extrai dados verbatim (códigos, cupons...) usa data no título de propósito
-    datePolicy: cfg.style?.datePolicy ?? (cfg.extraction.enabled ? 'allow' : 'avoid'),
-  };
+export function resolveStylePolicy(cfg: TemplateConfig): StylePolicy {
+  return stylePolicyOf(cfg.extraction.enabled, cfg.style);
 }
 export type TemplatePrompts = z.infer<typeof templatePromptsSchema>;
 

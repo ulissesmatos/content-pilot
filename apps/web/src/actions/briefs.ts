@@ -189,6 +189,21 @@ export async function publishBriefAction(input: unknown): Promise<ActionResult> 
   });
 }
 
+const listCategoriesSchema = z.object({ siteId: z.string().uuid() });
+
+/** Categorias do WordPress do site, para escolher em uma lista em vez de digitar um ID. */
+export async function listSiteCategoriesAction(input: unknown): Promise<ActionResult<Array<{ id: number; name: string }>>> {
+  return runAuthedAction(listCategoriesSchema, input, async ({ siteId }, { workspaceId }) => {
+    const wp = await getWordPressForSite(workspaceId, siteId);
+    try {
+      const terms = await wp.listCategories();
+      return terms.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    } catch {
+      throw new UserFacingError('Não consegui buscar as categorias deste site.');
+    }
+  });
+}
+
 const regenerateImageSchema = z.object({
   id: z.string().uuid(),
   /** 'cover' ou 'inline-N': o slot do relatório de imagens. */

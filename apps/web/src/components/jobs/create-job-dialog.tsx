@@ -5,6 +5,7 @@ import { Pencil, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { CRON_PRESETS } from '@content-pilot/core/client';
 import { createJobAction, updateJobAction } from '@/actions/jobs';
+import { ChoiceCards, Field, FormSection, MoreOptions, SwitchRow, stickyFooterClass } from '@/components/form-layout';
 import { QuickCreateSiteDialog } from '@/components/sites/quick-create-site-dialog';
 import { QuickCreateTemplateDialog } from '@/components/templates/quick-create-template-dialog';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 
 interface Option {
   id: string;
@@ -45,8 +45,8 @@ export interface JobFormInitial {
 }
 
 const MODE_HINTS: Record<'eco' | 'full', string> = {
-  eco: 'Pré-checagem sem IA compara as fontes com o publicado; o LLM só é chamado quando os códigos mudam. Sem mudança, apenas a data do widget é atualizada (zero tokens).',
-  full: 'Extract avançado das fontes + 2 chamadas LLM por post (geração e verificação) — mais completo, porém mais caro e lento.',
+  eco: 'Uma pré-checagem sem IA compara as fontes com o que está publicado, e o modelo só é chamado quando os códigos mudam. Sem mudança, só a data do widget é atualizada (zero tokens).',
+  full: 'Extração avançada das fontes e 2 chamadas de IA por post (geração e verificação). Mais completo, porém mais caro e lento.',
 };
 
 const SEARCH_DEPTH_HINTS: Record<'auto' | 'basic' | 'advanced', string> = {
@@ -173,88 +173,91 @@ function JobDialog({
                 : 'Atualiza periodicamente os posts do filtro usando o template escolhido.'}
           </DialogDescription>
         </DialogHeader>
-        <form action={submit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="job-name">Nome</Label>
-            <Input id="job-name" name="name" placeholder="ex.: Códigos Roblox 2x/dia" defaultValue={initial?.name} required />
-            {err('name') ? <p className="text-destructive text-xs">{err('name')}</p> : null}
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Site</Label>
-                <QuickCreateSiteDialog
-                  wordpressCredentials={wordpressCredentials}
-                  onCreated={(site) => {
-                    setExtraSites((prev) => [...prev, site]);
-                    setSiteId(site.id);
-                  }}
-                />
-              </div>
-              <Select value={siteId} onValueChange={setSiteId}>
+        <form action={submit} className="space-y-6">
+          <FormSection title="Identificação">
+            <Field label="Nome" htmlFor="job-name" error={err('name')}>
+              <Input id="job-name" name="name" placeholder="ex.: Códigos Roblox 2x/dia" defaultValue={initial?.name} required />
+            </Field>
+          </FormSection>
+
+          <FormSection title="O que atualizar" description="Os posts que já estão no site, escolhidos por tag ou categoria.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Site"
+                action={
+                  <QuickCreateSiteDialog
+                    wordpressCredentials={wordpressCredentials}
+                    onCreated={(site) => {
+                      setExtraSites((prev) => [...prev, site]);
+                      setSiteId(site.id);
+                    }}
+                  />
+                }
+              >
+                <Select value={siteId} onValueChange={setSiteId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {siteOptions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Template"
+                action={
+                  <QuickCreateTemplateDialog
+                    templates={templateOptions}
+                    onCreated={(template) => {
+                      setExtraTemplates((prev) => [...prev, template]);
+                      setTemplateId(template.id);
+                    }}
+                  />
+                }
+              >
+                <Select value={templateId} onValueChange={setTemplateId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templateOptions.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="IDs de tags (WP)" htmlFor="job-tags" optional hint="Separe por vírgula. Vazio = todos os posts.">
+                <Input id="job-tags" name="tags" placeholder="ex.: 114" defaultValue={initial?.tags} />
+              </Field>
+              <Field label="IDs de categorias (WP)" htmlFor="job-cats" optional hint="Separe por vírgula.">
+                <Input id="job-cats" name="categories" placeholder="ex.: 5, 12" defaultValue={initial?.categories} />
+              </Field>
+            </div>
+          </FormSection>
+
+          <FormSection title="Quando">
+            <Field label="Agendamento" error={err('scheduleCron')}>
+              <Select value={cronPreset} onValueChange={setCronPreset}>
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {siteOptions.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
+                  {CRON_PRESETS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
                     </SelectItem>
                   ))}
+                  <SelectItem value="custom">Personalizado</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Template</Label>
-                <QuickCreateTemplateDialog
-                  templates={templateOptions}
-                  onCreated={(template) => {
-                    setExtraTemplates((prev) => [...prev, template]);
-                    setTemplateId(template.id);
-                  }}
-                />
-              </div>
-              <Select value={templateId} onValueChange={setTemplateId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templateOptions.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="job-tags">IDs de tags (WP)</Label>
-              <Input id="job-tags" name="tags" placeholder="ex.: 114" defaultValue={initial?.tags} />
-              <p className="text-muted-foreground text-xs">Separe por vírgula. Vazio = todas.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="job-cats">IDs de categorias (WP)</Label>
-              <Input id="job-cats" name="categories" placeholder="ex.: 5, 12" defaultValue={initial?.categories} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Agendamento</Label>
-            <Select value={cronPreset} onValueChange={setCronPreset}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CRON_PRESETS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-                <SelectItem value="custom">Personalizado</SelectItem>
-              </SelectContent>
-            </Select>
             {cronPreset === 'custom' ? (
               <div className="space-y-3 rounded-lg border p-3">
                 <div className="flex gap-1">
@@ -322,60 +325,54 @@ function JobDialog({
                 </button>
               </div>
             ) : null}
-            {err('scheduleCron') ? <p className="text-destructive text-xs">{err('scheduleCron')}</p> : null}
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Modo de execução</Label>
-              <Select value={mode} onValueChange={(v) => setMode(v as 'eco' | 'full')}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="eco">Econômico</SelectItem>
-                  <SelectItem value="full">Completo</SelectItem>
-                </SelectContent>
-              </Select>
+            </Field>
+          </FormSection>
+
+          <FormSection title="Como atualizar">
+            <ChoiceCards
+              label="Modo de execução"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'eco', label: 'Econômico', description: MODE_HINTS.eco },
+                { value: 'full', label: 'Completo', description: MODE_HINTS.full },
+              ]}
+            />
+            <SwitchRow
+              label="Pular se as fontes não mudaram"
+              description="Evita chamadas de IA quando a web não trouxe nada novo."
+              checked={skipUnchanged}
+              onCheckedChange={setSkipUnchanged}
+            />
+          </FormSection>
+
+          <MoreOptions label="Limites, busca e idioma">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Posts por execução" htmlFor="job-max">
+                <Input id="job-max" name="maxPostsPerRun" type="number" defaultValue={initial?.maxPostsPerRun ?? 10} min={1} max={100} />
+              </Field>
+              <Field label="Orçamento (tokens)" htmlFor="job-budget" hint="Por execução. A execução para quando chega no limite.">
+                <Input id="job-budget" name="tokenBudgetPerRun" type="number" defaultValue={initial?.tokenBudgetPerRun ?? 500000} step={1000} />
+              </Field>
+              <Field label="Busca Tavily" hint={SEARCH_DEPTH_HINTS[searchDepth]}>
+                <Select value={searchDepth} onValueChange={(v) => setSearchDepth(v as 'auto' | 'basic' | 'advanced')}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Automática</SelectItem>
+                    <SelectItem value="basic">Basic</SelectItem>
+                    <SelectItem value="advanced">Advanced</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Idioma" htmlFor="job-lang" optional hint="Vazio = idioma padrão do template.">
+                <Input id="job-lang" name="language" placeholder="ex.: pt-BR" defaultValue={initial?.language} />
+              </Field>
             </div>
-            <div className="space-y-2">
-              <Label>Busca Tavily</Label>
-              <Select value={searchDepth} onValueChange={(v) => setSearchDepth(v as 'auto' | 'basic' | 'advanced')}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Automática</SelectItem>
-                  <SelectItem value="basic">Basic</SelectItem>
-                  <SelectItem value="advanced">Advanced</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <p className="text-muted-foreground text-xs">
-            {MODE_HINTS[mode]} Busca: {SEARCH_DEPTH_HINTS[searchDepth]}
-          </p>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="job-max">Posts por execução</Label>
-              <Input id="job-max" name="maxPostsPerRun" type="number" defaultValue={initial?.maxPostsPerRun ?? 10} min={1} max={100} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="job-budget">Orçamento (tokens)</Label>
-              <Input id="job-budget" name="tokenBudgetPerRun" type="number" defaultValue={initial?.tokenBudgetPerRun ?? 500000} step={1000} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="job-lang">Idioma (opcional)</Label>
-              <Input id="job-lang" name="language" placeholder="padrão do site" defaultValue={initial?.language} />
-            </div>
-          </div>
-          <div className="flex items-center justify-between rounded-lg border p-3">
-            <div>
-              <p className="text-sm font-medium">Pular se as fontes não mudaram</p>
-              <p className="text-muted-foreground text-xs">Evita chamadas de IA quando a web não trouxe nada novo.</p>
-            </div>
-            <Switch checked={skipUnchanged} onCheckedChange={setSkipUnchanged} />
-          </div>
-          <DialogFooter>
+          </MoreOptions>
+
+          <DialogFooter className={stickyFooterClass}>
             <Button type="submit" disabled={pending || disabled || !siteId || !templateId}>
               {pending ? 'Salvando...' : isEdit ? 'Salvar alterações' : 'Criar job'}
             </Button>

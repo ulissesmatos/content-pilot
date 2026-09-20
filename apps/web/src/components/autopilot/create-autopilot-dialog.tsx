@@ -7,6 +7,7 @@ import { AutopilotDialog, type AutopilotInitial } from './autopilot-dialog';
 interface Option {
   id: string;
   name: string;
+  summary?: string[];
 }
 
 export function CreateAutopilotDialog(props: {

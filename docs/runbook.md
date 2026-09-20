@@ -388,6 +388,23 @@ outra. Se a imagem foi removida do post no WordPress, a troca falha **antes** de
 gastar a geração. Sem permissão de edição no WordPress só a capa pode ser trocada,
 porque o HTML renderizado não traz o `wp-image-ID`.
 
+## Configurar imagens, revisão e embeds no template
+
+No editor de template (`/templates/<id>`), duas abas cobrem o que antes só existia no JSON:
+
+- **Imagens**: liga/desliga, tamanho da capa e das imagens do texto (1280×720, 1920×1080,
+  1200×630, 700×300 ou personalizado, dentro de 200–3840 × 100–2160), quantidade no texto,
+  formato (WebP) e qualidade, de onde vêm (imagem de destaque das fontes, busca na web) e
+  quantas candidatas o modelo de visão compara.
+- **Texto e revisão**: sem travessão, datas no título (evitar/permitir), revisão editorial
+  e vídeo/tweets.
+
+O que o template não define vale o padrão do worker: a tela lê os mesmos padrões
+(`packages/core/src/templates/policy.ts`), então mostra exatamente o que vai acontecer, e só
+grava um campo quando o usuário o muda. Templates de dados estruturados (códigos, cupons)
+têm padrões diferentes (sem revisão, sem embeds, data no título permitida). Os formulários
+de pauta e de autopilot mostram, abaixo do template escolhido, um resumo do que ele faz.
+
 ## Migrações desta versão
 
 `0009_email_auth.sql` cria `auth_tokens` (links de troca de senha e confirmação,

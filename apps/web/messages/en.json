@@ -559,11 +559,14 @@
     "remainingTells": "Still sounds like AI:",
     "imagesTitle": "Images",
     "imagesEmpty": "No image was added to this article.",
-    "imagesSummary": "{total, plural, one {# image} other {# images}}: {generated} AI generated and {real} real.",
     "imagesNotes": "How each image was chosen",
     "embedsTitle": "Videos and tweets",
     "embedsEmpty": "No verified video or tweet made it into this article.",
     "embedYoutube": "YouTube video",
-    "embedTweet": "Tweet"
+    "embedTweet": "Tweet",
+    "imagesTotal": "{count, plural, one {# image} other {# images}}",
+    "imagesReal": "{count} real",
+    "imagesGenerated": "{count} AI generated",
+    "postUnavailable": "The text did not load right now, so there is no preview. Use \"Open on WordPress\" to see the post."
   }
 }

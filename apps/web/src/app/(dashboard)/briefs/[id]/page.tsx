@@ -142,7 +142,7 @@ export default async function BriefPreviewPage({ params }: { params: Promise<{ i
               </CardContent>
             </Card>
           ) : (
-            <p className="text-muted-foreground text-sm">{t('noPost')}</p>
+            <p className="text-muted-foreground text-sm">{brief.createdWpPostId ? t('postUnavailable') : t('noPost')}</p>
           )}
 
           {/* os relatórios da geração valem mesmo quando o texto do WordPress não carregou */}

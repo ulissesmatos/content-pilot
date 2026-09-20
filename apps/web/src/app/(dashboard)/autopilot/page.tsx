@@ -1,3 +1,4 @@
+import { summarizeTemplate } from '@content-pilot/core/client';
 import Link from 'next/link';
 import { and, desc, eq, gte, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { CircleDollarSign, ClipboardCheck, FileText, Sparkles } from 'lucide-react';
@@ -71,7 +72,7 @@ export default async function AutopilotPage() {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-  const [configs, siteRows, templateRows, wpCredentialRows, feed, monthCosts, monthStats] = await Promise.all([
+  const [configs, siteRows, templateRaw, wpCredentialRows, feed, monthCosts, monthStats] = await Promise.all([
     db
       .select({ config: autopilotConfigs, siteName: sites.name, templateName: contentTemplates.name })
       .from(autopilotConfigs)
@@ -81,7 +82,7 @@ export default async function AutopilotPage() {
       .orderBy(desc(autopilotConfigs.createdAt)),
     db.select({ id: sites.id, name: sites.name }).from(sites).where(eq(sites.workspaceId, workspaceId)),
     db
-      .select({ id: contentTemplates.id, name: contentTemplates.name })
+      .select({ id: contentTemplates.id, name: contentTemplates.name, config: contentTemplates.config })
       .from(contentTemplates)
       .where(or(isNull(contentTemplates.workspaceId), eq(contentTemplates.workspaceId, workspaceId))),
     db
@@ -120,6 +121,12 @@ export default async function AutopilotPage() {
       .from(discoveredTopics)
       .where(eq(discoveredTopics.workspaceId, workspaceId)),
   ]);
+  // o formulário mostra o que cada template faz (revisão, imagens, embeds)
+  const templateRows = templateRaw.map((r) => ({
+    id: r.id,
+    name: r.name,
+    summary: summarizeTemplate((r.config ?? {}) as Parameters<typeof summarizeTemplate>[0]),
+  }));
 
   // descoberta/geração do autopilot em andamento → página se atualiza sozinha
   const [runningRun] = await db

@@ -79,6 +79,16 @@ export interface DiscoveryCandidate {
   angle: string;
   /** Título SEO sugerido (revisável depois na geração). */
   suggestedTitle: string;
+  /**
+   * Trecho LITERAL das fontes buscadas que comprova a afirmação central do
+   * ângulo — não só que o assunto existe, mas a característica específica que
+   * o tema promete. Checado de forma determinística contra o texto real das
+   * fontes (ver `runDiscovery`): sem citação real, o candidato é descartado
+   * antes de virar pauta. Sem isto, um ângulo inventado (ex.: um modo de jogo
+   * que o jogo não tem) só seria pego, se pego, depois de gastar a geração
+   * inteira do artigo.
+   */
+  evidenceQuote: string;
 }
 
 /** Schema de saída da chamada de classificação (structured output). */
@@ -96,8 +106,13 @@ export function buildDiscoveryResponseSchema(): JsonSchema {
             keywords: { type: 'array', items: { type: 'string' } },
             angle: { type: 'string', description: 'Gancho editorial em 1 frase.' },
             suggestedTitle: { type: 'string', description: 'Título SEO com a keyword principal.' },
+            evidenceQuote: {
+              type: 'string',
+              description:
+                'Trecho copiado EXATAMENTE (sem parafrasear) dos resultados de busca que comprova a característica específica do ângulo — não apenas que o assunto/jogo existe. Sem uma citação real assim, não proponha o candidato.',
+            },
           },
-          required: ['topic', 'contentType', 'keywords', 'angle', 'suggestedTitle'],
+          required: ['topic', 'contentType', 'keywords', 'angle', 'suggestedTitle', 'evidenceQuote'],
           additionalProperties: false,
         },
       },

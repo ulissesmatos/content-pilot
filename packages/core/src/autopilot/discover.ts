@@ -82,6 +82,20 @@ export function maxSimilarity(topic: string, existingTitles: string[]): number {
  */
 export const DEDUPE_UNCERTAIN_MIN = 0.25;
 
+const normalizeForMatch = (s: string) => stripDiacritics(s.toLowerCase()).replace(/\s+/g, ' ').trim();
+
+/**
+ * A citação precisa aparecer literalmente nas fontes e ter tamanho mínimo —
+ * poucas palavras soltas ("o jogo", "modo online") aparecem em quase qualquer
+ * texto e não provam nada específico; um modelo apressado poderia citar isso
+ * só para "passar" na checagem.
+ */
+export function isGroundedInSources(evidenceQuote: string, searchContext: string): boolean {
+  const quote = normalizeForMatch(evidenceQuote);
+  if (quote.length < 12) return false;
+  return normalizeForMatch(searchContext).includes(quote);
+}
+
 /** Só os títulos minimamente parecidos com algum candidato entram no prompt de dedup. */
 export function relevantTitlesFor(candidates: DiscoveryCandidate[], existingTitles: string[], cap = 150): string[] {
   const tokenSets = candidates.map((c) => titleTokens(c.topic));
@@ -189,6 +203,8 @@ REGRAS:
 - Temas específicos e pesquisáveis (não "novidades de games", mas "o que muda no sistema de amigos do [jogo X]").${dateRule(input, true)}
 - Prefira o que aparece com força nas fontes (sinais de interesse real do público).
 - Não repita o mesmo assunto em candidatos diferentes.
+- NUNCA invente uma característica do jogo/produto que as fontes não confirmam (ex.: um modo cooperativo/multiplayer que ele não tem). Se as fontes só confirmam que o assunto existe, mas não a característica específica do seu ângulo, não proponha esse candidato.
+- Para CADA candidato, copie em "evidenceQuote" um trecho LITERAL dos RESULTADOS DA BUSCA acima (sem parafrasear) que comprove a afirmação central do ângulo — não basta provar que o jogo/assunto existe, precisa provar a característica específica prometida no ângulo. Se você não consegue copiar uma citação real que prove isso, não proponha o candidato.
 
 RESPONDA EXATAMENTE NESTE FORMATO JSON (use estes nomes de campo, sem markdown):
 {
@@ -198,7 +214,8 @@ RESPONDA EXATAMENTE NESTE FORMATO JSON (use estes nomes de campo, sem markdown):
       "contentType": "um de: ${typeList}",
       "keywords": ["2-5 termos de busca reais"],
       "angle": "gancho editorial em 1 frase",
-      "suggestedTitle": "título SEO com a keyword principal"
+      "suggestedTitle": "título SEO com a keyword principal",
+      "evidenceQuote": "trecho literal dos resultados de busca que comprova o ângulo"
     }
   ]
 }`;
@@ -217,6 +234,8 @@ RULES:
 - Prefer what shows strong signal in the sources (real audience interest).
 - Do not repeat the same subject across candidates.
 - Write "topic", "angle" and "suggestedTitle" in ${LANGUAGE_NAMES[language] ?? language} — even if the sources above are in another language.
+- NEVER invent a feature of the game/product that the sources don't confirm (e.g. a co-op/multiplayer mode it doesn't have). If the sources only confirm the subject exists but not the specific feature your angle claims, do not propose that candidate.
+- For EACH candidate, copy into "evidenceQuote" a LITERAL excerpt from the WEB SEARCH RESULTS above (not paraphrased) that proves the angle's central claim — proving the game/subject exists is not enough, it must prove the specific feature the angle promises. If you cannot copy a real quote proving that, do not propose the candidate.
 
 RESPOND EXACTLY IN THIS JSON FORMAT (use these field names, no markdown):
 {
@@ -226,7 +245,8 @@ RESPOND EXACTLY IN THIS JSON FORMAT (use these field names, no markdown):
       "contentType": "one of: ${typeList}",
       "keywords": ["2-5 real search terms"],
       "angle": "editorial hook in one sentence",
-      "suggestedTitle": "SEO title with the main keyword"
+      "suggestedTitle": "SEO title with the main keyword",
+      "evidenceQuote": "literal excerpt from the search results proving the angle"
     }
   ]
 }`;
@@ -352,10 +372,24 @@ export async function runDiscovery(input: DiscoveryInput, deps: DiscoveryDeps): 
 
   if (candidates.length === 0) return { ...base, status: 'no_candidates', skipReason: 'nenhum candidato válido' };
 
-  // 3a. Dedup determinístico (barra duplicatas óbvias sem gastar LLM)
+  // 2b. Checagem de embasamento: descarta candidato cuja citação não é real
+  // (mesmo padrão anti-alucinação do validate-output para listas verbatim,
+  // aplicado aqui, ANTES de virar pauta). Sem isto, um ângulo inventado (ex.:
+  // um modo cooperativo que o jogo não tem) só seria pego, se pego, depois de
+  // gastar a geração inteira do artigo.
   const discarded: DiscardedTopic[] = [];
-  const afterDeterministic: DiscoveryCandidate[] = [];
+  const groundedCandidates: DiscoveryCandidate[] = [];
   for (const c of candidates) {
+    if (isGroundedInSources(c.evidenceQuote, searchContext)) groundedCandidates.push(c);
+    else discarded.push({ topic: c.topic, reason: 'premissa não confirmada nas fontes (possível alucinação)' });
+  }
+  if (groundedCandidates.length < candidates.length) {
+    log(`checagem de embasamento: ${candidates.length - groundedCandidates.length} descartado(s) sem citação real nas fontes`);
+  }
+
+  // 3a. Dedup determinístico (barra duplicatas óbvias sem gastar LLM)
+  const afterDeterministic: DiscoveryCandidate[] = [];
+  for (const c of groundedCandidates) {
     const dup = isNearDuplicate(c.topic, input.existingTitles);
     if (dup) discarded.push({ topic: c.topic, reason: `similar a post existente: "${dup}"` });
     else afterDeterministic.push(c);
@@ -528,6 +562,7 @@ function normalizeCandidates(
       keywords: Array.isArray(kwRaw) ? kwRaw.map((k) => String(k).trim()).filter(Boolean).slice(0, 8) : [],
       angle: firstString(r, ['angle', 'hook', 'summary', 'description']),
       suggestedTitle: clean(firstString(r, ['suggestedTitle', 'seoTitle', 'headline', 'title']) || topic),
+      evidenceQuote: firstString(r, ['evidenceQuote', 'evidence', 'quote', 'sourceQuote']),
     });
   }
   return out;

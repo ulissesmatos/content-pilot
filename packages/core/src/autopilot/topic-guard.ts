@@ -102,7 +102,7 @@ export async function checkTopicAlreadyCovered(
   if (!deps.llm || similarity < TOPIC_GUARD_SEMANTIC_MIN) return base;
 
   const titles = relevantTitlesFor(
-    [{ topic: input.topic, contentType: 'evergreen', keywords: [], angle: '', suggestedTitle: input.topic }],
+    [{ topic: input.topic, contentType: 'evergreen', keywords: [], angle: '', suggestedTitle: input.topic, evidenceQuote: '' }],
     input.existingTitles,
     60,
   );

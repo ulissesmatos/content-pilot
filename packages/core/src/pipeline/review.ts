@@ -303,7 +303,7 @@ O QUE FAZER:
 5. TÍTULO: depois de revisar, releia o título com o texto final na cabeça. Ele descreve exatamente o que o artigo entrega, sem prometer o que o texto não tem? Se sim, devolva-o IGUAL em revisedTitle. Se dá para casar melhor com o texto (mais fiel, mais específico, mais natural, sem sensacionalismo), devolva o novo em revisedTitle e explique em titleReason numa frase. O novo título mantém o assunto, tem entre ${input.titleMin ?? 10} e ${input.titleMax ?? 120} caracteres e não traz números, datas nem nomes que não estejam no texto ou nas fontes.
 
 REGRAS DURAS (a revisão é descartada se alguma for quebrada):
-- Preserve TODOS os blocos Gutenberg, todos os títulos e todos os links <a href> com as MESMAS URLs.
+- Preserve TODOS os blocos Gutenberg, todos os títulos e todos os links <a href> com as MESMAS URLs. Ao reescrever o texto DENTRO de um bloco, mantenha o par abertura+fechamento ao redor dele — ex.: <!-- wp:paragraph --><p>texto novo</p><!-- /wp:paragraph -->. NUNCA devolva uma abertura <!-- wp:X --> sem o <!-- /wp:X --> correspondente.
 - NÃO invente números, datas, nomes, citações nem fatos. Se um dado não está no rascunho nem nas fontes, não o escreva.
 - Não encurte o artigo: revisar não é resumir. Sem título dentro do HTML, sem <script>, sem <style>.
 - O título novo é descartado se mudar de assunto ou trouxer número que não está no texto nem nas fontes.${style}
@@ -330,7 +330,7 @@ WHAT TO DO:
 5. TITLE: after reviewing, reread the title with the final text in mind. Does it describe exactly what the article delivers, without promising what the text lacks? If so, return it UNCHANGED in revisedTitle. If it can match the text better (more faithful, more specific, more natural, not sensational), return the new one in revisedTitle and explain in titleReason in one sentence. The new title keeps the subject, is between ${input.titleMin ?? 10} and ${input.titleMax ?? 120} characters and has no numbers, dates or names that are not in the text or the sources.
 
 HARD RULES (the review is discarded if any is broken):
-- Preserve ALL Gutenberg blocks, headings and <a href> links with the SAME URLs.
+- Preserve ALL Gutenberg blocks, headings and <a href> links with the SAME URLs. When rewriting the text INSIDE a block, keep the opening+closing pair around it — e.g., <!-- wp:paragraph --><p>new text</p><!-- /wp:paragraph -->. NEVER return an opening <!-- wp:X --> without its matching <!-- /wp:X -->.
 - Do NOT invent numbers, dates, names, quotes or facts. If a datum is not in the draft or sources, do not write it.
 - Do not shorten the article: reviewing is not summarizing. No title inside the HTML, no <script>, no <style>.
 - The new title is discarded if it changes subject or has a number that is not in the text or the sources.${style}

@@ -39,6 +39,15 @@ como pacote npm.
   colagem entra como texto puro.
 - Origem "Enviada por você" no relatório de imagens do artigo.
 - `updateMedia` no adaptador do WordPress (alt, legenda e título do anexo).
+- Checagem de embasamento na Descoberta: cada tema candidato precisa vir com
+  uma citação literal das fontes pesquisadas que comprove a característica
+  específica do ângulo (não só que o assunto existe) — descartado
+  automaticamente sem uma citação real. Evita o autopilot propor (e depois
+  escrever um artigo inteiro sobre) uma característica que o produto/jogo não
+  tem de verdade.
+- "Regerar" pauta falhada reaproveita a pesquisa e o rascunho anterior em vez
+  de rodar tudo do zero — mesmo mecanismo que já existia para retry de
+  atualização de post.
 
 ### Changed
 - Datas e horas do painel passam a ser mostradas em UTC-3
@@ -58,6 +67,16 @@ como pacote npm.
   conta; no máximo uma gravação por minuto por credencial.
 - O rodapé fixo dos modais (botão Salvar) deixava o conteúdo vazar por baixo
   dele, principalmente em janelas baixas.
+- Prompt de geração de artigo NOVO (ambos os templates) listava só a tag de
+  abertura dos blocos Gutenberg, nunca o par com o fechamento — causava
+  "blocos Gutenberg desbalanceados" e reprovava a validação. O prompt de
+  atualização já tinha o exemplo completo e nunca teve o problema; a etapa de
+  revisão editorial recebeu o mesmo reforço.
+- Seletor de idioma do autopilot existia no backend mas não tinha campo na
+  tela — todo autopilot rodava em pt-BR independente da escolha. Também
+  faltava uma instrução explícita de idioma no prompt: pedir outro idioma sem
+  um template traduzido para ele silenciosamente saía no idioma padrão do
+  template.
 
 ## [0.3.0] - 2026-09-20
 

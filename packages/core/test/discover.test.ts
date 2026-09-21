@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDiscoveryQueries,
+  isGroundedInSources,
   isNearDuplicate,
   jaccard,
   runDiscovery,
@@ -91,6 +92,24 @@ describe('isNearDuplicate', () => {
   });
 });
 
+describe('isGroundedInSources', () => {
+  const context = '- Blox Fruits update 25 [2026-07-01]: novo update saiu\n- Grow a Garden codes: novos códigos';
+
+  it('aceita citação literal presente nas fontes', () => {
+    expect(isGroundedInSources('novo update saiu', context)).toBe(true);
+  });
+  it('ignora acentos/caixa/espaços na comparação', () => {
+    expect(isGroundedInSources('NOVOS   Códigos', context)).toBe(true);
+  });
+  it('recusa citação que não aparece nas fontes (alucinação)', () => {
+    expect(isGroundedInSources('modo cooperativo para até 4 jogadores', context)).toBe(false);
+  });
+  it('recusa citação vazia ou curta demais pra provar algo', () => {
+    expect(isGroundedInSources('', context)).toBe(false);
+    expect(isGroundedInSources('o jogo', context)).toBe(false);
+  });
+});
+
 describe('buildDiscoveryQueries', () => {
   it('gera queries pt por semente', () => {
     const qs = buildDiscoveryQueries(['Roblox codes'], 'pt-BR', new Date('2026-07-09'));
@@ -107,8 +126,8 @@ describe('buildDiscoveryQueries', () => {
 describe('runDiscovery', () => {
   const candidatesJson = JSON.stringify({
     candidates: [
-      { topic: 'Códigos Blox Fruits julho 2026', contentType: 'evergreen', keywords: ['blox fruits codes'], angle: 'x', suggestedTitle: 'Códigos Blox Fruits (Julho 2026)' },
-      { topic: 'Códigos Grow a Garden', contentType: 'list', keywords: ['grow a garden codes'], angle: 'y', suggestedTitle: 'Códigos Grow a Garden' },
+      { topic: 'Códigos Blox Fruits julho 2026', contentType: 'evergreen', keywords: ['blox fruits codes'], angle: 'x', suggestedTitle: 'Códigos Blox Fruits (Julho 2026)', evidenceQuote: 'novo update saiu' },
+      { topic: 'Códigos Grow a Garden', contentType: 'list', keywords: ['grow a garden codes'], angle: 'y', suggestedTitle: 'Códigos Grow a Garden', evidenceQuote: 'novos códigos' },
     ],
   });
 
@@ -196,13 +215,37 @@ describe('runDiscovery', () => {
     expect(res.status).toBe('no_candidates');
   });
 
+  it('descarta candidato sem citação real nas fontes (premissa inventada)', async () => {
+    const mixedJson = JSON.stringify({
+      candidates: [
+        {
+          topic: 'Blox Fruits ganha modo cooperativo online',
+          contentType: 'news',
+          keywords: ['blox fruits coop'],
+          angle: 'x',
+          suggestedTitle: 'Blox Fruits: modo coop chega ao jogo',
+          evidenceQuote: 'modo cooperativo online para até 4 jogadores', // não está nas fontes — alucinação
+        },
+        { topic: 'Códigos Grow a Garden', contentType: 'list', keywords: ['grow a garden codes'], angle: 'y', suggestedTitle: 'Códigos Grow a Garden', evidenceQuote: 'novos códigos' },
+      ],
+    });
+    const llm = fakeLlm([{ text: mixedJson }]);
+    const deps: DiscoveryDeps = { search: fakeSearch, llmDiscover: llm };
+    const res = await runDiscovery(baseInput(), deps);
+    expect(res.status).toBe('ok');
+    expect(res.kept.length).toBe(1);
+    expect(res.kept[0]!.topic).toContain('Grow a Garden');
+    const rejected = res.discarded.find((d) => d.topic.includes('modo cooperativo'));
+    expect(rejected?.reason).toBe('premissa não confirmada nas fontes (possível alucinação)');
+  });
+
   it('tolera nomes de campo alternativos (topics/theme/type) de modelos em json_object', async () => {
     // Regressão real: OpenRouter/deepseek em json_object nomeou a lista "topics"
     // e o campo "theme"/"type" em vez de candidates/topic/contentType.
     const altShape = JSON.stringify({
       topics: [
-        { theme: 'Jogos do PS Plus de julho', type: 'news', keywords: ['ps plus julho'], angle: 'x', suggestedTitle: 'PS Plus Julho 2026' },
-        { theme: 'Códigos de Dress to Impress', type: 'list', keywords: ['dti codes'], angle: 'y', suggestedTitle: 'Códigos DTI' },
+        { theme: 'Jogos do PS Plus de julho', type: 'news', keywords: ['ps plus julho'], angle: 'x', suggestedTitle: 'PS Plus Julho 2026', evidenceQuote: 'novo update saiu' },
+        { theme: 'Códigos de Dress to Impress', type: 'list', keywords: ['dti codes'], angle: 'y', suggestedTitle: 'Códigos DTI', evidenceQuote: 'novos códigos' },
       ],
     });
     const llm = fakeLlm([{ text: altShape }]);

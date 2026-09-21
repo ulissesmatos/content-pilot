@@ -1,5 +1,5 @@
 import { assertWorkerWorkspace } from '../lib/tenant';
-import { briefs, discoveredTopics, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
+import { and, briefs, discoveredTopics, eq, resolveTaskModel, runItems, runs, sites, type Db } from '@content-pilot/db';
 import {
   checkTopicAlreadyCovered,
   emptyImageReport,
@@ -24,6 +24,7 @@ import {
   type EmbedItem,
   type ImageHint,
   type ImageReport,
+  type PipelineResult,
 } from '@content-pilot/core';
 import {
   preflightLlmTasks,
@@ -45,7 +46,7 @@ import type { BriefGeneratePayload } from './names';
  * WordPress como rascunho ou publicado, conforme o publishMode da pauta.
  */
 export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload) {
-  const { briefId, runId } = payload;
+  const { briefId, runId, retryRunItemId } = payload;
   const startedAt = Date.now();
 
   const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -59,6 +60,11 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
   if (run.briefId !== briefId || run.workspaceId !== brief.workspaceId) throw new Error('Queue ownership mismatch');
   await assertWorkerWorkspace(db, run.workspaceId);
   const workspaceId = brief.workspaceId;
+  // Regeração de pauta falhada: reaproveita a pesquisa/rascunho do run_item
+  // anterior em vez de gastar Tavily de novo — só refaz a redação.
+  const retryItem = retryRunItemId
+    ? (await db.select().from(runItems).where(and(eq(runItems.id, retryRunItemId), eq(runItems.workspaceId, workspaceId))).limit(1))[0]
+    : null;
   const logger = createRunLogger(db, runId, `[brief ${briefId}]`);
   const log = logger.log;
 
@@ -204,6 +210,18 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
           title: brief.topic,
           slug: slugify(brief.topic),
         },
+        retryContext: retryItem?.searchContext
+          ? {
+              searchContext: retryItem.searchContext ?? '',
+              sources: (retryItem.sources as PipelineResult['sources']) ?? [],
+              sourcesHash: retryItem.sourcesHash,
+              resultsCount: Array.isArray(retryItem.sources) ? retryItem.sources.length : 0,
+              extractedResultsCount: Array.isArray(retryItem.sources)
+                ? (retryItem.sources as Array<{ extractedContentChars?: number }>).filter((source) => (source.extractedContentChars ?? 0) > 0).length
+                : 0,
+              draftText: retryItem.draftText,
+            }
+          : undefined,
       },
       {
         llmGenerate,
@@ -233,6 +251,9 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
           droppedData: result.dropped,
           validationErrors: result.validationErrors.length ? result.validationErrors : null,
           sources: result.sources,
+          searchContext: result.searchContext,
+          sourcesHash: result.sourcesHash,
+          draftText: result.draftText,
           durationMs: Date.now() - startedAt,
         })
         .returning({ id: runItems.id });

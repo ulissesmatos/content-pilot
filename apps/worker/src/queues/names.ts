@@ -23,6 +23,7 @@ export interface PostProcessPayload {
 export interface BriefGeneratePayload {
   briefId: string;
   runId: string;
+  retryRunItemId?: string;
 }
 
 export interface AutopilotDiscoverPayload {

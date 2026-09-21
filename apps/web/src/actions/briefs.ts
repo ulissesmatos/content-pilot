@@ -2,7 +2,7 @@
 
 import { UserFacingError } from '@/lib/errors';
 import { revalidatePath } from 'next/cache';
-import { and, briefs, eq, getTenantDb, runs, sites } from '@content-pilot/db';
+import { and, briefs, desc, eq, getTenantDb, runItems, runs, sites } from '@content-pilot/db';
 import { jobLlmConfigSchema } from '@content-pilot/core';
 import { z } from 'zod';
 import { runAuthedAction, type ActionResult } from '@/lib/action-utils';
@@ -28,7 +28,7 @@ const createBriefSchema = z.object({
   publishMode: z.enum(['draft', 'publish']).default('draft'),
 });
 
-async function enqueueBriefGeneration(briefId: string, workspaceId: string): Promise<string> {
+async function enqueueBriefGeneration(briefId: string, workspaceId: string, retryRunItemId?: string): Promise<string> {
   const db = getTenantDb(workspaceId);
   const [run] = await db
     .insert(runs)
@@ -38,7 +38,7 @@ async function enqueueBriefGeneration(briefId: string, workspaceId: string): Pro
   const boss = await getBoss();
   const sent = await boss.send(
     'brief.generate',
-    { briefId, runId: run!.id },
+    { briefId, runId: run!.id, retryRunItemId },
     { singletonKey: briefId, retryLimit: 1, retryDelay: 120, expireInSeconds: 900 },
   );
   if (!sent) {
@@ -158,8 +158,18 @@ export async function regenerateBriefAction(input: unknown): Promise<ActionResul
       throw new UserFacingError('Só pautas com falha podem ser regeradas. Para refazer um post já criado, exclua o rascunho no WordPress e crie uma nova pauta.');
     }
 
+    // Reaproveita a pesquisa/rascunho da tentativa anterior — evita gastar
+    // Tavily de novo quando o problema foi só a redação (ex.: HTML malformado).
+    const [failedItem] = await db
+      .select({ id: runItems.id })
+      .from(runItems)
+      .innerJoin(runs, eq(runItems.runId, runs.id))
+      .where(and(eq(runs.briefId, id), eq(runs.workspaceId, workspaceId)))
+      .orderBy(desc(runItems.createdAt))
+      .limit(1);
+
     await db.update(briefs).set({ status: 'queued', error: null, updatedAt: new Date() }).where(eq(briefs.id, id));
-    const runId = await enqueueBriefGeneration(id, workspaceId);
+    const runId = await enqueueBriefGeneration(id, workspaceId, failedItem?.id);
     revalidatePath('/briefs');
     return { runId };
   });

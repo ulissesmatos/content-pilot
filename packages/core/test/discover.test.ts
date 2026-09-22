@@ -4,6 +4,7 @@ import {
   isGroundedInSources,
   isNearDuplicate,
   jaccard,
+  newsAgeDays,
   runDiscovery,
   titleTokens,
   type DiscoveryDeps,
@@ -107,6 +108,24 @@ describe('isGroundedInSources', () => {
   it('recusa citação vazia ou curta demais pra provar algo', () => {
     expect(isGroundedInSources('', context)).toBe(false);
     expect(isGroundedInSources('o jogo', context)).toBe(false);
+  });
+});
+
+describe('newsAgeDays', () => {
+  const context = '- Blox Fruits update 25 [2026-07-01]: novo update saiu';
+  const now = new Date('2026-07-15T00:00:00Z');
+
+  it('calcula a idade quando a data é real e aparece nas fontes', () => {
+    expect(newsAgeDays('2026-07-01', context, now)).toBe(14);
+  });
+  it('null quando a data não é do formato YYYY-MM-DD', () => {
+    expect(newsAgeDays('01/07/2026', context, now)).toBeNull();
+  });
+  it('null quando a data não aparece de verdade nas fontes (inventada)', () => {
+    expect(newsAgeDays('2026-07-14', context, now)).toBeNull();
+  });
+  it('null quando não há data (evergreen/list/guide, ou news sem data clara)', () => {
+    expect(newsAgeDays(null, context, now)).toBeNull();
   });
 });
 
@@ -237,6 +256,54 @@ describe('runDiscovery', () => {
     expect(res.kept[0]!.topic).toContain('Grow a Garden');
     const rejected = res.discarded.find((d) => d.topic.includes('modo cooperativo'));
     expect(rejected?.reason).toBe('premissa não confirmada nas fontes (possível alucinação)');
+  });
+
+  it('descarta candidato "news" cuja fonte já tem mais de newsMaxAgeDays', async () => {
+    const staleJson = JSON.stringify({
+      candidates: [
+        {
+          topic: 'Blox Fruits lança update 25',
+          contentType: 'news',
+          keywords: ['blox fruits update 25'],
+          angle: 'x',
+          suggestedTitle: 'Blox Fruits: o que muda no update 25',
+          evidenceQuote: 'novo update saiu',
+          sourceDate: '2026-07-01',
+        },
+        { topic: 'Códigos Grow a Garden', contentType: 'list', keywords: ['grow a garden codes'], angle: 'y', suggestedTitle: 'Códigos Grow a Garden', evidenceQuote: 'novos códigos', sourceDate: null },
+      ],
+    });
+    const llm = fakeLlm([{ text: staleJson }]);
+    const deps: DiscoveryDeps = { search: fakeSearch, llmDiscover: llm, now: () => new Date('2026-07-20T00:00:00Z') };
+    // fonte de 01/07, "hoje" 20/07 → 19 dias, acima do padrão de 10
+    const res = await runDiscovery(baseInput(), deps);
+    expect(res.status).toBe('ok');
+    expect(res.kept.length).toBe(1);
+    expect(res.kept[0]!.topic).toContain('Grow a Garden');
+    const rejected = res.discarded.find((d) => d.topic.includes('update 25'));
+    expect(rejected?.reason).toContain('19 dia(s)');
+  });
+
+  it('mantém "news" com fonte dentro do limite de idade configurado', async () => {
+    const freshJson = JSON.stringify({
+      candidates: [
+        {
+          topic: 'Blox Fruits lança update 25',
+          contentType: 'news',
+          keywords: ['blox fruits update 25'],
+          angle: 'x',
+          suggestedTitle: 'Blox Fruits: o que muda no update 25',
+          evidenceQuote: 'novo update saiu',
+          sourceDate: '2026-07-01',
+        },
+      ],
+    });
+    const llm = fakeLlm([{ text: freshJson }]);
+    const deps: DiscoveryDeps = { search: fakeSearch, llmDiscover: llm, now: () => new Date('2026-07-03T00:00:00Z') };
+    // 2 dias de idade, dentro do padrão de 10
+    const res = await runDiscovery(baseInput(), deps);
+    expect(res.kept.length).toBe(1);
+    expect(res.discarded).toHaveLength(0);
   });
 
   it('tolera nomes de campo alternativos (topics/theme/type) de modelos em json_object', async () => {

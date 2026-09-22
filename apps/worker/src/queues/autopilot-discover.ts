@@ -176,6 +176,7 @@ export async function handleAutopilotDiscover(db: Db, boss: PgBoss, payload: Aut
         postsPerCycle: postsThisCycle,
         allowedTypes: discovery.allowedTypes.length ? discovery.allowedTypes : undefined,
         avoidDates: stylePolicy ? stylePolicy.datePolicy === 'avoid' : true,
+        newsMaxAgeDays: discovery.newsMaxAgeDays,
       },
       {
         search,

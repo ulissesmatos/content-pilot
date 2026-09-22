@@ -45,6 +45,13 @@ export const autopilotDiscoverySchema = z.object({
   dedupeLookback: z.number().int().min(20).max(400).default(120),
   /** Orçamento de tokens da fase de descoberta (a geração tem o seu próprio). */
   discoverTokenBudget: z.number().int().positive().default(60_000),
+  /**
+   * Idade máxima (em dias) de uma fonte para um candidato tipo "news" ainda
+   * valer como novidade. Só entra em vigor quando o modelo consegue apontar
+   * (e o código confirma) a data real da fonte — sem data verificável, o
+   * candidato passa sem essa checagem, nunca é descartado por incerteza.
+   */
+  newsMaxAgeDays: z.number().int().min(1).max(90).default(10),
 });
 export type AutopilotDiscovery = z.infer<typeof autopilotDiscoverySchema>;
 
@@ -89,6 +96,15 @@ export interface DiscoveryCandidate {
    * inteira do artigo.
    */
   evidenceQuote: string;
+  /**
+   * Data (YYYY-MM-DD) da fonte que embasa um candidato "news", copiada de um
+   * "[data]" real dos resultados de busca. null quando não há data clara na
+   * fonte, ou quando o tipo não é "news" (evergreen/list/guide não precisam
+   * ser recentes). Sem data verificável, `runDiscovery` não aplica a checagem
+   * de idade — a ausência de data nunca descarta o candidato por si só, só a
+   * comprovação de que a fonte é velha demais.
+   */
+  sourceDate: string | null;
 }
 
 /** Schema de saída da chamada de classificação (structured output). */
@@ -111,8 +127,13 @@ export function buildDiscoveryResponseSchema(): JsonSchema {
               description:
                 'Trecho copiado EXATAMENTE (sem parafrasear) dos resultados de busca que comprova a característica específica do ângulo — não apenas que o assunto/jogo existe. Sem uma citação real assim, não proponha o candidato.',
             },
+            sourceDate: {
+              type: ['string', 'null'],
+              description:
+                'Só para contentType "news": a data (YYYY-MM-DD) copiada de um "[data]" real ao lado da fonte usada. null se não houver data clara, ou se o tipo não for "news".',
+            },
           },
-          required: ['topic', 'contentType', 'keywords', 'angle', 'suggestedTitle', 'evidenceQuote'],
+          required: ['topic', 'contentType', 'keywords', 'angle', 'suggestedTitle', 'evidenceQuote', 'sourceDate'],
           additionalProperties: false,
         },
       },

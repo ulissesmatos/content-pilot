@@ -48,6 +48,12 @@ como pacote npm.
 - "Regerar" pauta falhada reaproveita a pesquisa e o rascunho anterior em vez
   de rodar tudo do zero — mesmo mecanismo que já existia para retry de
   atualização de post.
+- Candidato "news" da Descoberta com fonte comprovadamente velha (mais de
+  `newsMaxAgeDays`, padrão 10 dias) é descartado antes de virar pauta —
+  notícia de 3 semanas atrás não vale mais como novidade. Só entra em vigor
+  quando a própria IA aponta uma data e ela bate com uma data real nos
+  resultados de busca; sem data verificável, o candidato passa normalmente
+  (nunca descarta por incerteza, só por comprovação).
 
 ### Changed
 - Datas e horas do painel passam a ser mostradas em UTC-3

@@ -96,6 +96,38 @@ export function isGroundedInSources(evidenceQuote: string, searchContext: string
   return normalizeForMatch(searchContext).includes(quote);
 }
 
+/**
+ * Tavily devolve published_date em formatos inconsistentes (ISO com hora,
+ * RFC 2822 com nome de mês/dia da semana...). Normaliza pra YYYY-MM-DD antes
+ * de mostrar na fonte — é o formato que o prompt pede de volta em
+ * "sourceDate", e a checagem de idade depende de bater exatamente com o que
+ * está no texto das fontes.
+ */
+function normalizeIsoDate(raw: string): string | null {
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+/** Idade máxima padrão (dias) de fonte "news" verificável — configurável por config do autopilot. */
+export const NEWS_DEFAULT_MAX_AGE_DAYS = 10;
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Idade em dias de uma "news" cuja data a própria IA reportou — null quando
+ * não dá pra confiar nela (formato inválido, ou a data nem aparece de
+ * verdade no texto das fontes, sinal de que foi inventada pra "passar" na
+ * checagem). Ausência de data NUNCA descarta um candidato por si só; só a
+ * comprovação de que a fonte é velha demais o faz (ver `runDiscovery`).
+ */
+export function newsAgeDays(sourceDate: string | null, searchContext: string, now: Date): number | null {
+  if (!sourceDate || !ISO_DATE.test(sourceDate) || !searchContext.includes(sourceDate)) return null;
+  const parsed = new Date(`${sourceDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Math.round((now.getTime() - parsed.getTime()) / 86_400_000);
+}
+
 /** Só os títulos minimamente parecidos com algum candidato entram no prompt de dedup. */
 export function relevantTitlesFor(candidates: DiscoveryCandidate[], existingTitles: string[], cap = 150): string[] {
   const tokenSets = candidates.map((c) => titleTokens(c.topic));
@@ -140,6 +172,8 @@ export interface DiscoveryInput {
    * nicho usa data como convenção (ex.: códigos de jogos) devem desligar.
    */
   avoidDates?: boolean;
+  /** Idade máxima (dias) de fonte "news" verificável. Padrão: 10. */
+  newsMaxAgeDays?: number;
 }
 
 export interface DiscardedTopic {
@@ -189,6 +223,7 @@ function buildDiscoveryPrompt(input: DiscoveryInput, searchContext: string, lang
   const typeList = (input.allowedTypes?.length ? input.allowedTypes : CONTENT_TYPES).join(', ');
   const site = input.siteName ? ` do blog "${input.siteName}"` : '';
   const seeds = input.seedTopics.join(', ');
+  const maxAgeDays = input.newsMaxAgeDays ?? NEWS_DEFAULT_MAX_AGE_DAYS;
 
   if (isPt) {
     return `Você é um editor-chefe${site} planejando a pauta de conteúdo.
@@ -205,6 +240,7 @@ REGRAS:
 - Não repita o mesmo assunto em candidatos diferentes.
 - NUNCA invente uma característica do jogo/produto que as fontes não confirmam (ex.: um modo cooperativo/multiplayer que ele não tem). Se as fontes só confirmam que o assunto existe, mas não a característica específica do seu ângulo, não proponha esse candidato.
 - Para CADA candidato, copie em "evidenceQuote" um trecho LITERAL dos RESULTADOS DA BUSCA acima (sem parafrasear) que comprove a afirmação central do ângulo — não basta provar que o jogo/assunto existe, precisa provar a característica específica prometida no ângulo. Se você não consegue copiar uma citação real que prove isso, não proponha o candidato.
+- NOTÍCIA VELHA NÃO É NOVIDADE: se o tipo for "news", olhe a data entre colchetes ao lado de cada fonte. Se a fonte mais recente que comprova o fato tem mais de ${maxAgeDays} dias (hoje é ${todayLong(language, now)}), NÃO proponha como "news" — ou descarte o candidato, ou proponha como "evergreen" se ainda fizer sentido sem ser "novidade". Em "sourceDate", copie a data (formato YYYY-MM-DD) do colchete da fonte usada; null se não houver data clara ou o tipo não for "news".
 
 RESPONDA EXATAMENTE NESTE FORMATO JSON (use estes nomes de campo, sem markdown):
 {
@@ -215,6 +251,7 @@ RESPONDA EXATAMENTE NESTE FORMATO JSON (use estes nomes de campo, sem markdown):
       "keywords": ["2-5 termos de busca reais"],
       "angle": "gancho editorial em 1 frase",
       "suggestedTitle": "título SEO com a keyword principal",
+      "sourceDate": "YYYY-MM-DD ou null",
       "evidenceQuote": "trecho literal dos resultados de busca que comprova o ângulo"
     }
   ]
@@ -236,6 +273,7 @@ RULES:
 - Write "topic", "angle" and "suggestedTitle" in ${LANGUAGE_NAMES[language] ?? language} — even if the sources above are in another language.
 - NEVER invent a feature of the game/product that the sources don't confirm (e.g. a co-op/multiplayer mode it doesn't have). If the sources only confirm the subject exists but not the specific feature your angle claims, do not propose that candidate.
 - For EACH candidate, copy into "evidenceQuote" a LITERAL excerpt from the WEB SEARCH RESULTS above (not paraphrased) that proves the angle's central claim — proving the game/subject exists is not enough, it must prove the specific feature the angle promises. If you cannot copy a real quote proving that, do not propose the candidate.
+- OLD NEWS IS NOT NEWS: if the type is "news", look at the date in brackets next to each source. If the most recent source proving the fact is older than ${maxAgeDays} days (today is ${todayLong(language, now)}), do NOT propose it as "news" — either drop the candidate, or propose it as "evergreen" if it still makes sense without being framed as new. In "sourceDate", copy the date (YYYY-MM-DD) from the bracket of the source used; null if there's no clear date or the type isn't "news".
 
 RESPOND EXACTLY IN THIS JSON FORMAT (use these field names, no markdown):
 {
@@ -246,7 +284,8 @@ RESPOND EXACTLY IN THIS JSON FORMAT (use these field names, no markdown):
       "keywords": ["2-5 real search terms"],
       "angle": "editorial hook in one sentence",
       "suggestedTitle": "SEO title with the main keyword",
-      "evidenceQuote": "literal excerpt from the search results proving the angle"
+      "evidenceQuote": "literal excerpt from the search results proving the angle",
+      "sourceDate": "YYYY-MM-DD or null"
     }
   ]
 }`;
@@ -335,7 +374,8 @@ export async function runDiscovery(input: DiscoveryInput, deps: DiscoveryDeps): 
       if (!r.url || seen.has(r.url)) continue;
       seen.add(r.url);
       const snippet = (r.content ?? '').slice(0, 300).replace(/\s+/g, ' ').trim();
-      lines.push(`- ${r.title ?? '(sem título)'}${r.published_date ? ` [${r.published_date}]` : ''}: ${snippet}`);
+      const dateTag = r.published_date ? normalizeIsoDate(r.published_date) : null;
+      lines.push(`- ${r.title ?? '(sem título)'}${dateTag ? ` [${dateTag}]` : ''}: ${snippet}`);
     }
   }
   base.sourcesCount = seen.size;
@@ -379,12 +419,24 @@ export async function runDiscovery(input: DiscoveryInput, deps: DiscoveryDeps): 
   // gastar a geração inteira do artigo.
   const discarded: DiscardedTopic[] = [];
   const groundedCandidates: DiscoveryCandidate[] = [];
+  const maxAgeDays = input.newsMaxAgeDays ?? NEWS_DEFAULT_MAX_AGE_DAYS;
   for (const c of candidates) {
-    if (isGroundedInSources(c.evidenceQuote, searchContext)) groundedCandidates.push(c);
-    else discarded.push({ topic: c.topic, reason: 'premissa não confirmada nas fontes (possível alucinação)' });
+    if (!isGroundedInSources(c.evidenceQuote, searchContext)) {
+      discarded.push({ topic: c.topic, reason: 'premissa não confirmada nas fontes (possível alucinação)' });
+      continue;
+    }
+    // "news" com data verificável e velha demais não vale como novidade —
+    // sem data verificável (comum: Tavily nem sempre traz published_date), a
+    // checagem não se aplica e o candidato segue normalmente.
+    const age = c.contentType === 'news' ? newsAgeDays(c.sourceDate, searchContext, now) : null;
+    if (age !== null && age > maxAgeDays) {
+      discarded.push({ topic: c.topic, reason: `notícia com ${age} dia(s) — velha demais pra valer como novidade (limite: ${maxAgeDays}d)` });
+      continue;
+    }
+    groundedCandidates.push(c);
   }
   if (groundedCandidates.length < candidates.length) {
-    log(`checagem de embasamento: ${candidates.length - groundedCandidates.length} descartado(s) sem citação real nas fontes`);
+    log(`checagem de embasamento/atualidade: ${candidates.length - groundedCandidates.length} descartado(s)`);
   }
 
   // 3a. Dedup determinístico (barra duplicatas óbvias sem gastar LLM)
@@ -563,6 +615,7 @@ function normalizeCandidates(
       angle: firstString(r, ['angle', 'hook', 'summary', 'description']),
       suggestedTitle: clean(firstString(r, ['suggestedTitle', 'seoTitle', 'headline', 'title']) || topic),
       evidenceQuote: firstString(r, ['evidenceQuote', 'evidence', 'quote', 'sourceQuote']),
+      sourceDate: firstString(r, ['sourceDate', 'publishedDate', 'date']) || null,
     });
   }
   return out;

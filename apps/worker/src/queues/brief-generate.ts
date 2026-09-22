@@ -185,7 +185,7 @@ export async function handleBriefGenerate(db: Db, payload: BriefGeneratePayload)
     const topicOrigin = discovered ? 'suggested' : 'requested';
     // ao mudar o enfoque o redator não pode cair em um assunto que o blog já cobriu
     const avoidTitles = relevantTitlesFor(
-      [{ topic: brief.topic, contentType: 'evergreen', keywords: [], angle: '', suggestedTitle: brief.topic, evidenceQuote: '' }],
+      [{ topic: brief.topic, contentType: 'evergreen', keywords: [], angle: '', suggestedTitle: brief.topic, evidenceQuote: '', sourceDate: null }],
       existingTitles,
       25,
     );
